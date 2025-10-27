@@ -1,0 +1,13 @@
+{
+  "moduleId": "index",
+  "name": "index",
+  "description": "Основной MCP серверный модуль, регистрирует tools и resources для управления архитектурой проектов через Model Context Protocol",
+  "inputs": "Запросы через MCP protocol, параметры через tool calls (projectId, description, modules, etc.)",
+  "outputs": "MCP responses с архитектурными данными, подтверждения операций, JSON-RPC результаты",
+  "dependencies": ["types", "storage"],
+  "notes": "Регистрирует 5 tools (set-project-architecture, get-project-architecture, set-module-details, get-module-details, list-modules) и 2 resources (arch://projectId, module://projectId/moduleId). Использует McpServer из @modelcontextprotocol/sdk.",
+  "createdAt": "2024-10-27T14:30:00.000Z",
+  "updatedAt": "2024-10-27T14:30:00.000Z"
+}
+
+

@@ -1,10 +1,19 @@
 # MCP Architector
 
-Model Context Protocol (MCP) server for architecture and system design.
+[![npm version](https://img.shields.io/npm/v/mcp-architector.svg)](https://www.npmjs.com/package/mcp-architector)
+[![GitHub](https://img.shields.io/github/license/theSharque/mcp-architect)](https://github.com/theSharque/mcp-architect)
+
+> Model Context Protocol (MCP) server for architecture and system design
+
+**Local-first MCP server** that stores and manages project architecture information. All data is stored locally in `~/.mcp-architector` for maximum privacy and confidentiality.
+
+📦 **Install**: `npm install -g mcp-architector` or use via npx  
+🌐 **npm**: https://www.npmjs.com/package/mcp-architector  
+🔗 **GitHub**: https://github.com/theSharque/mcp-architect
 
 ## Overview
 
-A local-first MCP server that stores and manages project architecture information. All data is stored locally in `~/.mcp-architector` for maximum privacy and confidentiality.
+Store and manage project architecture, modules, scripts, data flow, and usage examples - all locally with complete privacy.
 
 ## Features
 
@@ -27,14 +36,29 @@ A local-first MCP server that stores and manages project architecture informatio
         └── ...
 ```
 
-## Installation
+## Quick Start
 
-1. Install dependencies:
+### For Users (using npm package)
+
+```bash
+# No installation needed - use directly in Cursor/Claude Desktop
+# Just configure it as described in Integration section below
+```
+
+### For Developers
+
+1. Clone the repository:
+```bash
+git clone https://github.com/theSharque/mcp-architect.git
+cd mcp-architect
+```
+
+2. Install dependencies:
 ```bash
 npm install
 ```
 
-2. Build the project:
+3. Build the project:
 ```bash
 npm run build
 ```
@@ -62,24 +86,24 @@ Debug and test your server with the MCP Inspector:
 npm run inspector
 ```
 
-## Integration with Cursor
+## Integration
 
-### Configuration
-
-Add this server to your Cursor MCP configuration:
+### Cursor IDE
 
 1. Open Cursor Settings → Features → Model Context Protocol
 2. Click "Edit Config" button
-3. Add the server configuration
+3. Add one of the configurations below
 
-#### Option 1: Automatic project ID from environment
+#### Option 1: Via npm (Recommended)
+
+Installs from npm registry automatically:
 
 ```json
 {
   "mcpServers": {
     "architector": {
-      "command": "node",
-      "args": ["/absolute/path/to/mcp-architector/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "mcp-architector"],
       "env": {
         "MCP_PROJECT_ID": "${workspaceFolder}"
       }
@@ -88,29 +112,82 @@ Add this server to your Cursor MCP configuration:
 }
 ```
 
-**Note:** `${workspaceFolder}` will be automatically replaced by Cursor with the current workspace directory.
+#### Option 2: Via npm link (Development)
 
-#### Option 2: Manually specify project ID
+For local development with live changes:
 
 ```json
 {
   "mcpServers": {
     "architector": {
-      "command": "node",
-      "args": ["/absolute/path/to/mcp-architector/dist/index.js"],
+      "command": "mcp-architector",
       "env": {
-        "MCP_PROJECT_ID": "my-project-name"
+        "MCP_PROJECT_ID": "${workspaceFolder}"
       }
     }
   }
 }
 ```
 
-### Using Project ID in Tool Calls
+Requires: `cd /path/to/mcp-architector && npm link -g`
+
+#### Option 3: Direct path
+
+```json
+{
+  "mcpServers": {
+    "architector": {
+      "command": "node",
+      "args": ["/path/to/mcp-architector/dist/index.js"],
+      "env": {
+        "MCP_PROJECT_ID": "${workspaceFolder}"
+      }
+    }
+  }
+}
+```
+
+### Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "architector": {
+      "command": "npx",
+      "args": ["-y", "mcp-architector"],
+      "env": {
+        "MCP_PROJECT_ID": "${workspaceFolder}"
+      }
+    }
+  }
+}
+```
+
+### Continue.dev
+
+Edit `.continue/config.json`:
+
+```json
+{
+  "mcpServers": {
+    "architector": {
+      "command": "npx",
+      "args": ["-y", "mcp-architector"],
+      "env": {
+        "MCP_PROJECT_ID": "${workspaceFolder}"
+      }
+    }
+  }
+}
+```
+
+### Using Project ID
 
 When calling tools, you can:
 
-1. **Use automatic project ID** (from environment): Just omit the `projectId` parameter
+1. **Use automatic project ID** (from `${workspaceFolder}` env var): Just omit the `projectId` parameter
 2. **Override per call**: Pass `projectId` explicitly in the tool call
 3. **Use default**: If neither is provided, uses "default-project"
 

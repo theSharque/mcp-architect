@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "architector": {
+      "command": "node",
+      "args": ["/qs/mcp-architector/dist/index.js"],
+      "env": {
+        "MCP_PROJECT_ID": "${workspaceFolder}"
+      }
+    }
+  }
+}
+

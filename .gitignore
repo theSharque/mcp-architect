@@ -1,8 +1,8 @@
 # Dependencies
 node_modules/
 
-# Build outputs
-dist/
+# Build outputs  
+# dist/  # Keep dist/ for npx support
 build/
 
 # IDE

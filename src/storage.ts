@@ -196,7 +196,7 @@ export function normalizeProjectId(workdir?: string): string {
   if (!workdir || workdir === '') {
     throw new Error('Project ID is required (workdir context)');
   }
-  
+
   // Use workdir as project ID, normalized for filesystem
   return workdir.replace(/[^a-zA-Z0-9_-]/g, '_');
 }

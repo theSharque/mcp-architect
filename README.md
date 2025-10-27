@@ -193,6 +193,17 @@ Lists all modules in the project architecture.
 **Output:**
 - Array of module summaries
 
+### delete-module
+
+Deletes a module from the project architecture.
+
+**Input:**
+- `projectId` (optional): Project ID
+- `moduleName`: Name of the module to delete
+
+**Output:**
+- Success message
+
 ### set-script-documentation
 
 Creates or updates documentation for a script or command.

@@ -7,14 +7,13 @@ import {
   writeArchitecture,
   readModule,
   writeModule,
-  listModules,
   deleteModule,
   readScript,
   writeScript,
   listScripts,
   normalizeProjectId,
 } from "./storage.js";
-import type { ProjectArchitecture, ModuleDetails, ModuleSummary, UsageExample, ScriptDocumentation, DataFlow } from "./types.js";
+import type { ProjectArchitecture, ModuleDetails, ModuleSummary, ScriptDocumentation, DataFlow } from "./types.js";
 
 /**
  * MCP Architector Server
@@ -68,7 +67,7 @@ server.registerTool(
   async ({ description, modules, dataFlow, projectId: providedProjectId }) => {
     // Get project ID from parameter, global context, or use default
     const projectId = providedProjectId || globalProjectId || "default-project";
-    
+
     const moduleSummaries: ModuleSummary[] = modules.map((module) => ({
       id: uuidv4(),
       name: module.name,
@@ -188,15 +187,15 @@ server.registerTool(
   },
   async ({ name, description, inputs, outputs, dependencies, files, usageExamples, notes, projectId: providedProjectId }) => {
     const projectId = providedProjectId || globalProjectId || "default-project";
-    
+
     // Get or generate module ID
     const architecture = await readArchitecture(projectId);
     let moduleId: string;
-    
+
     if (architecture) {
       const existingModule = architecture.modules.find((m) => m.name === name);
       moduleId = existingModule ? existingModule.id : uuidv4();
-      
+
       // Update or add module to architecture
       if (existingModule) {
         existingModule.description = description;
@@ -375,6 +374,77 @@ server.registerTool(
 );
 
 /**
+ * Tool: Delete module
+ */
+server.registerTool(
+  "delete-module",
+  {
+    title: "Delete Module",
+    description: "Deletes a module from the project architecture",
+    inputSchema: {
+      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+      moduleName: z.string().describe("Name of the module to delete"),
+    },
+    outputSchema: {
+      message: z.string(),
+    },
+  },
+  async ({ moduleName, projectId: providedProjectId }) => {
+    const projectId = providedProjectId || globalProjectId || "default-project";
+
+    const architecture = await readArchitecture(projectId);
+    if (!architecture) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `No architecture found for project: ${projectId}`,
+          },
+        ],
+        structuredContent: {
+          message: `Architecture not found for project: ${projectId}`,
+        },
+      };
+    }
+
+    const module = architecture.modules.find((m) => m.name === moduleName);
+    if (!module) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Module '${moduleName}' not found`,
+          },
+        ],
+        structuredContent: {
+          message: `Module '${moduleName}' not found`,
+        },
+      };
+    }
+
+    // Delete module details file
+    await deleteModule(projectId, module.id);
+
+    // Remove from architecture
+    architecture.modules = architecture.modules.filter(m => m.id !== module.id);
+    architecture.updatedAt = new Date().toISOString();
+    await writeArchitecture(projectId, architecture);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Module '${moduleName}' deleted successfully`,
+        },
+      ],
+      structuredContent: {
+        message: `Module '${moduleName}' deleted successfully`,
+      },
+    };
+  }
+);
+
+/**
  * Resource: Project architecture
  */
 server.registerResource(
@@ -521,7 +591,7 @@ server.registerTool(
   },
   async ({ scriptName, projectId: providedProjectId }) => {
     const projectId = providedProjectId || globalProjectId || "default-project";
-    
+
     const scripts = await listScripts(projectId);
     let scriptDoc: ScriptDocumentation | null = null;
 
@@ -579,7 +649,7 @@ server.registerTool(
   },
   async ({ projectId: providedProjectId }) => {
     const projectId = providedProjectId || globalProjectId || "default-project";
-    
+
     const scriptIds = await listScripts(projectId);
     const scripts = await Promise.all(
       scriptIds.map(id => readScript(projectId, id))

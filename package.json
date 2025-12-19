@@ -1,6 +1,6 @@
 {
   "name": "mcp-architector",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP server for architecture and system design",
   "type": "module",
   "main": "dist/index.js",
@@ -21,7 +21,7 @@
   "author": "theSharque",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.16.0",
+    "@modelcontextprotocol/sdk": "^1.25.1",
     "uuid": "^11.0.3",
     "zod": "^3.25.76"
   },
@@ -32,4 +32,3 @@
     "typescript": "^5.8.3"
   }
 }
-

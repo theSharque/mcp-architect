@@ -1,6 +1,6 @@
 {
   "name": "mcp-architector",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "MCP server for architecture and system design",
   "type": "module",
   "main": "dist/index.js",
@@ -30,5 +30,10 @@
     "@types/uuid": "^10.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3"
+  },
+  "mcpName": "io.github.theSharque/mcp-architector",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/theSharque/mcp-architect.git"
   }
 }

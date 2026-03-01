@@ -7,9 +7,33 @@
 
 **Local-first MCP server** that stores and manages project architecture information. All data is stored locally in `~/.mcp-architector` for maximum privacy and confidentiality.
 
-📦 **Install**: `npm install -g mcp-architector` or use via npx  
-🌐 **npm**: https://www.npmjs.com/package/mcp-architector  
+📦 **Install**: `npm install -g mcp-architector` or use via npx
+🌐 **npm**: https://www.npmjs.com/package/mcp-architector
 🔗 **GitHub**: https://github.com/theSharque/mcp-architect
+
+## How to connect to Claude Desktop / IDE
+
+Add the server to your MCP config. Example for **claude_desktop_config.json**:
+
+**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+**Linux:** `~/.config/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "architector": {
+      "command": "npx",
+      "args": ["-y", "mcp-architector"],
+      "env": {
+        "MCP_PROJECT_ID": "${workspaceFolder}"
+      }
+    }
+  }
+}
+```
+
+For **Cursor IDE**: Settings → Features → Model Context Protocol → Edit Config, then add the same block inside `mcpServers`. See the [Integration](#integration) section for more options.
 
 ## Overview
 

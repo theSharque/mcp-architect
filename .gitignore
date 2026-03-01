@@ -23,6 +23,10 @@ yarn-error.log*
 .env
 .env.local
 
+# MCP publisher credentials (created by mcp-publisher login)
+.mcpregistry_github_token
+.mcpregistry_registry_token
+
 # Testing
 coverage/
 *.test.js

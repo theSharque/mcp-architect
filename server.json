@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.theSharque/mcp-architector",
+  "description": "MCP server for architecture and system design. Store and manage project architecture locally.",
+  "title": "mcp-architector",
+  "repository": {
+    "url": "https://github.com/theSharque/mcp-architect",
+    "source": "github"
+  },
+  "version": "1.2.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "mcp-architector",
+      "version": "1.2.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

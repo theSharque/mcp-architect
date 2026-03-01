@@ -12,23 +12,23 @@
     "inspector": "npx @modelcontextprotocol/inspector node dist/index.js",
     "prepublishOnly": "npm run build"
   },
-  "keywords": [
-    "mcp",
-    "model-context-protocol",
-    "architecture",
-    "system-design"
-  ],
+  "keywords": ["mcp", "model-context-protocol", "architecture", "system-design"],
   "author": "theSharque",
   "license": "MIT",
+  "overrides": {
+    "ajv": "8.18.0",
+    "qs": "6.14.2",
+    "hono": "4.12.3"
+  },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.25.1",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "uuid": "^11.0.3",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/node": "^24.0.14",
+    "@types/node": "^24.11.0",
     "@types/uuid": "^10.0.0",
-    "tsx": "^4.19.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.8.3"
   },
   "mcpName": "io.github.theSharque/mcp-architector",

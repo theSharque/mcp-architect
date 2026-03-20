@@ -41,7 +41,8 @@ server.registerTool(
   "set-project-architecture",
   {
     title: "Set Project Architecture",
-    description: "Creates or updates the overall architecture for a project",
+    description:
+      "Creates or replaces the entire project architecture. Each call overwrites the modules array and optional dataFlow—pass the full module list and dataFlow you intend to keep. To add or change only specific modules without dropping others, use set-module-details instead (or one call here with the complete modules + dataFlow).",
     inputSchema: {
       projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
       description: z.string().describe("Overall project description"),
@@ -111,7 +112,8 @@ server.registerTool(
   "get-project-architecture",
   {
     title: "Get Project Architecture",
-    description: "Retrieves the overall architecture of the project",
+    description:
+      "Returns project description, module summaries (optional inputs/outputs per module), and dataFlow. Summary inputs/outputs are present when set via set-project-architecture or set-module-details; older data may omit them. For dependencies, files, and usage examples, use get-module-details.",
     inputSchema: {
       projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
     },
@@ -159,7 +161,8 @@ server.registerTool(
   "set-module-details",
   {
     title: "Set Module Details",
-    description: "Creates or updates detailed information about a module",
+    description:
+      "Creates or updates one module: writes the full detail record and syncs name, description, inputs, and outputs into the architecture summary. Does not replace other modules—preferred for incremental updates instead of set-project-architecture.",
     inputSchema: {
       projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
       name: z.string().describe("Module name"),
@@ -199,12 +202,16 @@ server.registerTool(
       // Update or add module to architecture
       if (existingModule) {
         existingModule.description = description;
+        existingModule.inputs = inputs;
+        existingModule.outputs = outputs;
         existingModule.updatedAt = new Date().toISOString();
       } else {
         architecture.modules.push({
           id: moduleId,
           name,
           description,
+          inputs,
+          outputs,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
@@ -253,7 +260,8 @@ server.registerTool(
   "get-module-details",
   {
     title: "Get Module Details",
-    description: "Retrieves detailed information about a specific module",
+    description:
+      "Returns the full per-module record (inputs/outputs, dependencies, files, usage examples, notes)—authoritative when the architecture summary is thin or missing optional fields. Use moduleName matching the name in get-project-architecture.",
     inputSchema: {
       projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
       moduleName: z.string().describe("Name of the module to retrieve"),

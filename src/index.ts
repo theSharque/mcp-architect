@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -8,20 +11,23 @@ import {
   readModule,
   writeModule,
   deleteModule,
-  readScript,
-  writeScript,
-  listScripts,
+  listProjects,
   normalizeProjectId,
 } from "./storage.js";
-import type { ProjectArchitecture, ModuleDetails, ModuleSummary, ScriptDocumentation, DataFlow } from "./types.js";
+import { registerEntriesAndSlicesTools } from "./tools-entries-slices.js";
+import type { ProjectArchitecture, ModuleDetails, ModuleSummary, DataFlow } from "./types.js";
 
-/**
- * MCP Architector Server
- * A Model Context Protocol server for architecture and system design
- */
+function resolveProjectId(provided?: string): string {
+  return provided || globalProjectId || "default-project";
+}
+
+const packageJson = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../package.json"), "utf-8")
+) as { version: string };
+
 const server = new McpServer({
   name: "mcp-architector",
-  version: "1.0.0"
+  version: packageJson.version,
 });
 
 // Store the project ID from environment
@@ -42,7 +48,7 @@ server.registerTool(
   {
     title: "Set Project Architecture",
     description:
-      "Creates or replaces the entire project architecture. Each call overwrites the modules array and optional dataFlow—pass the full module list and dataFlow you intend to keep. To add or change only specific modules without dropping others, use set-module-details instead (or one call here with the complete modules + dataFlow).",
+      "Creates or replaces vertical module structure (components and dataFlow)—not horizontal facts. Overwrites the full modules list and dataFlow on each call; pass every module you want to keep. For one module use set-module-details. For APIs, domain terms, scripts use set-entry + get-slice—not this tool. If projectId is wrong, call list-projects first. Do not duplicate entry text in module descriptions.",
     inputSchema: {
       projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
       description: z.string().describe("Overall project description"),
@@ -66,26 +72,30 @@ server.registerTool(
     },
   },
   async ({ description, modules, dataFlow, projectId: providedProjectId }) => {
-    // Get project ID from parameter, global context, or use default
-    const projectId = providedProjectId || globalProjectId || "default-project";
+    const projectId = resolveProjectId(providedProjectId);
+    const existing = await readArchitecture(projectId);
+    const now = new Date().toISOString();
 
-    const moduleSummaries: ModuleSummary[] = modules.map((module) => ({
-      id: uuidv4(),
-      name: module.name,
-      description: module.description,
-      inputs: module.inputs,
-      outputs: module.outputs,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }));
+    const moduleSummaries: ModuleSummary[] = modules.map((module) => {
+      const existingModule = existing?.modules.find((m) => m.name === module.name);
+      return {
+        id: existingModule?.id ?? uuidv4(),
+        name: module.name,
+        description: module.description,
+        inputs: module.inputs ?? existingModule?.inputs,
+        outputs: module.outputs ?? existingModule?.outputs,
+        createdAt: existingModule?.createdAt ?? now,
+        updatedAt: now,
+      };
+    });
 
     const architecture: ProjectArchitecture = {
       projectId,
       description,
       modules: moduleSummaries,
       dataFlow: dataFlow as DataFlow | undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
     };
 
     await writeArchitecture(projectId, architecture);
@@ -113,7 +123,7 @@ server.registerTool(
   {
     title: "Get Project Architecture",
     description:
-      "Returns project description, module summaries (optional inputs/outputs per module), and dataFlow. Summary inputs/outputs are present when set via set-project-architecture or set-module-details; older data may omit them. For dependencies, files, and usage examples, use get-module-details.",
+      "Returns vertical structure: project description, module list, dataFlow. Use for refactoring boundaries between components. For all HTTP endpoints or domain terms use get-slice—not this tool. For one module's files and examples use get-module-details. projectId from list-projects if unsure.",
     inputSchema: {
       projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
     },
@@ -122,7 +132,7 @@ server.registerTool(
     },
   },
   async ({ projectId: providedProjectId }) => {
-    const projectId = providedProjectId || globalProjectId || "default-project";
+    const projectId = resolveProjectId(providedProjectId);
 
     const architecture = await readArchitecture(projectId);
 
@@ -154,6 +164,36 @@ server.registerTool(
   }
 );
 
+server.registerTool(
+  "list-projects",
+  {
+    title: "List Projects",
+    description:
+      "Lists all projects in ~/.mcp-architector with projectId, description, moduleCount, updatedAt, isCurrent. Call first when tools return empty/wrong project—the workspace path may normalize to a different id (e.g. _qs_my-app). Then pass projectId to other tools. Optional query filters by id or description.",
+    inputSchema: {
+      query: z.string().optional().describe("Filter by substring in projectId or description"),
+    },
+    outputSchema: {
+      projects: z.array(z.any()),
+    },
+  },
+  async ({ query }) => {
+    const projects = await listProjects(globalProjectId, query);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(projects, null, 2),
+        },
+      ],
+      structuredContent: {
+        projects,
+      },
+    };
+  }
+);
+
 /**
  * Tool: Set module details
  */
@@ -162,7 +202,7 @@ server.registerTool(
   {
     title: "Set Module Details",
     description:
-      "Creates or updates one module: writes the full detail record and syncs name, description, inputs, and outputs into the architecture summary. Does not replace other modules—preferred for incremental updates instead of set-project-architecture.",
+      "Creates or updates one vertical module (component): files, dependencies, usage examples, synced to architecture summary. Use for structural ownership—not for listing every API (use set-entry). Does not replace other modules. Prefer over set-project-architecture for single-module edits. Link entries via refs.moduleName; do not paste the same text into entries.",
     inputSchema: {
       projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
       name: z.string().describe("Module name"),
@@ -189,7 +229,7 @@ server.registerTool(
     },
   },
   async ({ name, description, inputs, outputs, dependencies, files, usageExamples, notes, projectId: providedProjectId }) => {
-    const projectId = providedProjectId || globalProjectId || "default-project";
+    const projectId = resolveProjectId(providedProjectId);
 
     // Get or generate module ID
     const architecture = await readArchitecture(projectId);
@@ -261,7 +301,7 @@ server.registerTool(
   {
     title: "Get Module Details",
     description:
-      "Returns the full per-module record (inputs/outputs, dependencies, files, usage examples, notes)—authoritative when the architecture summary is thin or missing optional fields. Use moduleName matching the name in get-project-architecture.",
+      "Returns one module's full detail (files, dependencies, examples). Use when you know the module name from get-project-architecture or list-modules. For cross-cutting API/domain lists use get-slice. moduleName must match architecture exactly.",
     inputSchema: {
       projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
       moduleName: z.string().describe("Name of the module to retrieve"),
@@ -271,7 +311,7 @@ server.registerTool(
     },
   },
   async ({ moduleName, projectId: providedProjectId }) => {
-    const projectId = providedProjectId || globalProjectId || "default-project";
+    const projectId = resolveProjectId(providedProjectId);
 
     const architecture = await readArchitecture(projectId);
     if (!architecture) {
@@ -340,7 +380,8 @@ server.registerTool(
   "list-modules",
   {
     title: "List All Modules",
-    description: "Lists all modules in the project architecture",
+    description:
+      "Lists module summaries from architecture (name, description)—vertical structure only. For horizontal facts (endpoints, tables, terms) use list-slices then get-slice. Use module names in set-entry refs.moduleName.",
     inputSchema: {
       projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
     },
@@ -349,7 +390,7 @@ server.registerTool(
     },
   },
   async ({ projectId: providedProjectId }) => {
-    const projectId = providedProjectId || globalProjectId || "default-project";
+    const projectId = resolveProjectId(providedProjectId);
 
     const architecture = await readArchitecture(projectId);
 
@@ -388,7 +429,8 @@ server.registerTool(
   "delete-module",
   {
     title: "Delete Module",
-    description: "Deletes a module from the project architecture",
+    description:
+      "Deletes one module from architecture and its module detail file. Does not delete entries—remove those with delete-entry if needed. Does not delete custom slices.",
     inputSchema: {
       projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
       moduleName: z.string().describe("Name of the module to delete"),
@@ -398,7 +440,7 @@ server.registerTool(
     },
   },
   async ({ moduleName, projectId: providedProjectId }) => {
-    const projectId = providedProjectId || globalProjectId || "default-project";
+    const projectId = resolveProjectId(providedProjectId);
 
     const architecture = await readArchitecture(projectId);
     if (!architecture) {
@@ -460,7 +502,8 @@ server.registerResource(
   new ResourceTemplate("arch://{projectId}", { list: undefined }),
   {
     title: "Project Architecture",
-    description: "Provides access to project architecture",
+    description:
+      "Resource URI arch://{projectId} — same JSON as get-project-architecture. Prefer tools for agent workflows.",
   },
   async (uri, { projectId }) => {
     const architecture = await readArchitecture(String(projectId));
@@ -497,7 +540,8 @@ server.registerResource(
   new ResourceTemplate("module://{projectId}/{moduleId}", { list: undefined }),
   {
     title: "Module Details",
-    description: "Provides access to module details",
+    description:
+      "Resource URI module://{projectId}/{moduleId} — same as get-module-details when you have module uuid. Prefer get-module-details with moduleName for agents.",
   },
   async (uri, { projectId, moduleId }) => {
     const moduleDetails = await readModule(String(projectId), String(moduleId));
@@ -526,158 +570,7 @@ server.registerResource(
   }
 );
 
-/**
- * Tool: Set script documentation
- */
-server.registerTool(
-  "set-script-documentation",
-  {
-    title: "Set Script Documentation",
-    description: "Creates or updates documentation for a script or command",
-    inputSchema: {
-      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
-      scriptName: z.string().describe("Name of the script"),
-      description: z.string().describe("Description of what the script does"),
-      usage: z.string().describe("Usage command or syntax"),
-      examples: z.array(z.string()).describe("Usage examples"),
-      parameters: z.record(z.string(), z.string()).describe("Parameters and their descriptions"),
-      notes: z.string().optional().describe("Additional notes"),
-    },
-    outputSchema: {
-      scriptId: z.string(),
-      message: z.string(),
-    },
-  },
-  async ({ scriptName, description, usage, examples, parameters, notes, projectId: providedProjectId }) => {
-    const projectId = providedProjectId || globalProjectId || "default-project";
-    const scriptId = uuidv4();
-
-    const scriptDoc: ScriptDocumentation = {
-      scriptId,
-      scriptName,
-      description,
-      usage,
-      examples,
-      parameters,
-      notes: notes || "",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    await writeScript(projectId, scriptDoc);
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Script documentation saved: ${scriptName}`,
-        },
-      ],
-      structuredContent: {
-        scriptId,
-        message: `Script '${scriptName}' saved successfully`,
-      },
-    };
-  }
-);
-
-/**
- * Tool: Get script documentation
- */
-server.registerTool(
-  "get-script-documentation",
-  {
-    title: "Get Script Documentation",
-    description: "Retrieves documentation for a specific script",
-    inputSchema: {
-      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
-      scriptName: z.string().describe("Name of the script to retrieve"),
-    },
-    outputSchema: {
-      script: z.any(),
-    },
-  },
-  async ({ scriptName, projectId: providedProjectId }) => {
-    const projectId = providedProjectId || globalProjectId || "default-project";
-
-    const scripts = await listScripts(projectId);
-    let scriptDoc: ScriptDocumentation | null = null;
-
-    // Find script by name
-    for (const scriptId of scripts) {
-      const script = await readScript(projectId, scriptId);
-      if (script && script.scriptName === scriptName) {
-        scriptDoc = script;
-        break;
-      }
-    }
-
-    if (!scriptDoc) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Script '${scriptName}' not found`,
-          },
-        ],
-        structuredContent: {
-          script: null,
-        },
-      };
-    }
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(scriptDoc, null, 2),
-        },
-      ],
-      structuredContent: {
-        script: scriptDoc,
-      },
-    };
-  }
-);
-
-/**
- * Tool: List all scripts
- */
-server.registerTool(
-  "list-scripts",
-  {
-    title: "List All Scripts",
-    description: "Lists all documented scripts in the project",
-    inputSchema: {
-      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
-    },
-    outputSchema: {
-      scripts: z.array(z.any()),
-    },
-  },
-  async ({ projectId: providedProjectId }) => {
-    const projectId = providedProjectId || globalProjectId || "default-project";
-
-    const scriptIds = await listScripts(projectId);
-    const scripts = await Promise.all(
-      scriptIds.map(id => readScript(projectId, id))
-    );
-
-    const validScripts = scripts.filter((s): s is ScriptDocumentation => s !== null);
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(validScripts, null, 2),
-        },
-      ],
-      structuredContent: {
-        scripts: validScripts,
-      },
-    };
-  }
-);
+registerEntriesAndSlicesTools(server, resolveProjectId);
 
 /**
  * Main function to start the MCP server

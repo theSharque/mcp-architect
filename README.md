@@ -51,14 +51,36 @@ Store and manage project architecture, modules, scripts, data flow, and usage ex
 ```
 ~/.mcp-architector/
 └── {projectId}/
-    ├── architecture.json      # Overall architecture
+    ├── architecture.json      # Modules + dataFlow (vertical structure)
     ├── modules/
-    │   ├── {moduleId}.json    # Module details
+    │   ├── {moduleId}.json
     │   └── ...
-    └── scripts/
-        ├── {scriptId}.json    # Script documentation
-        └── ...
+    ├── entries/
+    │   ├── index.json         # Catalog (no duplicate bodies)
+    │   └── {entryId}.json     # Canonical facts (API, domain, flows, …)
+    ├── slices/
+    │   └── {sliceId}.json     # Custom filters only (no items)
 ```
+
+## Data model
+
+| Layer | Purpose | Tools |
+|-------|---------|-------|
+| **Modules** | Vertical structure: components, dependencies, dataFlow | `set-project-architecture`, `set-module-details`, … |
+| **Entries** | Single source of truth for horizontal facts (one fact = one file) | `set-entry`, `get-entry`, `list-entries` |
+| **Slices** | Read-only views over entries (built-in or custom filters) | `list-slices`, `get-slice` |
+
+**Anti-patterns (no duplication):** Do not copy `module.description` into `entry.summary`. Link with `refs.moduleName`. Slices never store item copies—only filters in `slices/*.json`.
+
+## Agent workflow
+
+1. `list-projects` — confirm `projectId` if data looks empty or wrong.
+2. **Structure task** → `get-project-architecture` / `set-module-details`.
+3. **Discover a fact** (endpoint, table, term) → `set-entry` once.
+4. **Need a category** (all APIs, all domain terms) → `list-slices` → `get-slice` with `format=compact` or `table`.
+5. **Find by name** → `search-entries` → `get-entry` for full payload.
+
+Example: `set-entry` with `kind=http-endpoint`, `title=POST /orders`, then `get-slice` `sliceId=api` `format=table`.
 
 ## Quick Start
 
@@ -249,6 +271,41 @@ Retrieves the overall architecture of the project.
 **Output:**
 - Complete project architecture
 
+### list-projects
+
+Lists all projects in local storage (`~/.mcp-architector`). Use when the workspace may map to a different normalized `projectId`.
+
+**Input:**
+- `query` (optional): Filter by substring in projectId or description (case-insensitive)
+
+**Output:**
+- Array of project summaries: `projectId`, `description`, `moduleCount`, `updatedAt`, `isCurrent` (matches current `MCP_PROJECT_ID`)
+
+### Entries and slices
+
+| Tool | Purpose |
+|------|---------|
+| `set-entry` | Upsert one fact (`kind`, `title`, `summary`, optional `payload`, `refs`, `tags`) |
+| `get-entry` | Full entry by `id` |
+| `delete-entry` | Remove entry |
+| `list-entries` | Catalog without payload; filter by `kind`, `tags`, `query` |
+| `search-entries` | Text search in title, summary, kind, tags |
+| `list-slices` | Built-in + custom slices with entry counts |
+| `get-slice` | Filtered view: `sliceId`, `format` (`compact`/`detail`/`table`), `query`, `limit` |
+| `set-slice` | Save custom filter (`kinds`, `tags`) — no items |
+| `delete-slice` | Remove custom slice |
+
+**Built-in `sliceId` values:** `api`, `persistence`, `events`, `domain`, `flows`, `integrations`, `config`, `runtime`, `decisions`, `scripts`.
+
+**Recommended `kind` examples (any string allowed):**
+
+| sliceId | kinds |
+|---------|-------|
+| api | `http-endpoint`, `grpc-method`, `mcp-tool`, `cli-command`, … |
+| persistence | `db-table`, `entity`, `repository` |
+| domain | `glossary`, `invariant`, `lifecycle` |
+| scripts | `script` — use `set-entry` / `get-slice sliceId=scripts` |
+
 ### set-module-details
 
 Creates or updates detailed information about a module.
@@ -304,43 +361,6 @@ Deletes a module from the project architecture.
 
 **Output:**
 - Success message
-
-### set-script-documentation
-
-Creates or updates documentation for a script or command.
-
-**Input:**
-- `projectId` (optional): Project ID
-- `scriptName`: Name of the script
-- `description`: Description of what the script does
-- `usage`: Usage command or syntax
-- `examples`: Array of usage examples
-- `parameters`: Object mapping parameter names to descriptions
-- `notes` (optional): Additional notes
-
-**Output:**
-- Script ID and success message
-
-### get-script-documentation
-
-Retrieves documentation for a specific script.
-
-**Input:**
-- `projectId` (optional): Project ID
-- `scriptName`: Name of the script to retrieve
-
-**Output:**
-- Script documentation
-
-### list-scripts
-
-Lists all documented scripts in the project.
-
-**Input:**
-- `projectId` (optional): Project ID
-
-**Output:**
-- Array of script documentations
 
 ## Resources
 

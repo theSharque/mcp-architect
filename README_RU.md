@@ -51,14 +51,34 @@
 ```
 ~/.mcp-architector/
 └── {projectId}/
-    ├── architecture.json      # Общая архитектура
+    ├── architecture.json      # Модули + dataFlow (вертикальная структура)
     ├── modules/
-    │   ├── {moduleId}.json    # Детали модуля
+    │   ├── {moduleId}.json
     │   └── ...
-    └── scripts/
-        ├── {scriptId}.json    # Документация скрипта
-        └── ...
+    ├── entries/
+    │   ├── index.json         # Каталог без дублирования тел
+    │   └── {entryId}.json     # Канонические факты (API, домен, flows, …)
+    ├── slices/
+    │   └── {sliceId}.json     # Только фильтры (без items)
 ```
+
+## Модель данных
+
+| Слой | Назначение | Инструменты |
+|------|------------|-------------|
+| **Модули** | Вертикальная структура: компоненты, dataFlow | `set-project-architecture`, `set-module-details`, … |
+| **Entries** | Единственный источник фактов (один факт = один файл) | `set-entry`, `get-entry`, `list-entries` |
+| **Slices** | Представления над entries (встроенные или свои фильтры) | `list-slices`, `get-slice` |
+
+**Анти-паттерны:** не копировать `module.description` в `entry.summary`; связь через `refs.moduleName`. Срезы не хранят копии items.
+
+## Сценарий для агента
+
+1. `list-projects` — проверить `projectId`.
+2. Задача по структуре → `get-project-architecture` / `set-module-details`.
+3. Обнаружен факт → `set-entry`.
+4. Нужна категория (все API, домен) → `list-slices` → `get-slice`.
+5. Поиск по имени → `search-entries` → `get-entry`.
 
 ## Быстрый старт
 
@@ -232,6 +252,33 @@ npm run inspector
 
 Получает архитектуру проекта.
 
+### list-projects
+
+Список всех проектов в локальном хранилище (`~/.mcp-architector`). Нужен, когда workspace может соответствовать другому нормализованному `projectId`.
+
+**Вход:**
+- `query` (опц.): Фильтр по подстроке в projectId или description (без учёта регистра)
+
+**Выход:**
+- Массив кратких записей: `projectId`, `description`, `moduleCount`, `updatedAt`, `isCurrent` (совпадает с текущим `MCP_PROJECT_ID`)
+
+### Entries и slices
+
+| Tool | Назначение |
+|------|------------|
+| `set-entry` | Upsert факта: `kind`, `title`, `summary`, `payload`, `refs`, `tags` |
+| `get-entry` | Полная entry по `id` |
+| `delete-entry` | Удаление |
+| `list-entries` | Каталог без payload |
+| `search-entries` | Поиск по тексту |
+| `list-slices` | Встроенные и custom срезы |
+| `get-slice` | Срез: `sliceId`, `format`, `query`, `limit` |
+| `set-slice` / `delete-slice` | Custom фильтр (без items) |
+
+**Встроенные sliceId:** `api`, `persistence`, `events`, `domain`, `flows`, `integrations`, `config`, `runtime`, `decisions`, `scripts`.
+
+Команды: `set-entry` с `kind=script` или `get-slice sliceId=scripts`. При первом обращении к entries старая папка `scripts/` мигрируется и удаляется.
+
 ### set-module-details
 
 Создаёт или обновляет детали модуля.
@@ -247,18 +294,6 @@ npm run inspector
 ### delete-module
 
 Удаляет модуль из архитектуры.
-
-### set-script-documentation
-
-Документация скрипта или команды.
-
-### get-script-documentation
-
-Получает документацию скрипта.
-
-### list-scripts
-
-Список всех задокументированных скриптов.
 
 ## Ресурсы
 

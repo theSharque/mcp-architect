@@ -66,19 +66,36 @@
 
 | Слой | Назначение | Инструменты |
 |------|------------|-------------|
-| **Модули** | Вертикальная структура: компоненты, dataFlow | `set-project-architecture`, `set-module-details`, … |
-| **Entries** | Единственный источник фактов (один факт = один файл) | `set-entry`, `get-entry`, `list-entries` |
+| **Модули** | Вертикальная структура: компоненты, dataFlow | `set-project-architecture`, `set-module-details`, `set-module-data-flow`, `rebuild-data-flow`, `validate-architecture` |
+| **Entries** | Единственный источник фактов (один факт = один файл) | `set-entry`, `set-entries`, `get-entry`, `list-entries` |
 | **Slices** | Представления над entries (встроенные или свои фильтры) | `list-slices`, `get-slice` |
 
 **Анти-паттерны:** не копировать `module.description` в `entry.summary`; связь через `refs.moduleName`. Срезы не хранят копии items.
 
+**Не редактируйте `~/.mcp-architector` напрямую** — используйте MCP tools, чтобы сохранялись timestamps, merge-семантика и синхронизация inverse для dataFlow.
+
 ## Сценарий для агента
 
 1. `list-projects` — проверить `projectId`.
-2. Задача по структуре → `get-project-architecture` / `set-module-details`.
-3. Обнаружен факт → `set-entry`.
-4. Нужна категория (все API, домен) → `list-slices` → `get-slice`.
-5. Поиск по имени → `search-entries` → `get-entry`.
+2. Структура → `get-project-architecture` / `set-project-architecture`.
+3. **Каждый модуль** → `set-module-details` с `files` + **`facts[]`** (API, entity, glossary) в одном вызове, или `set-entries` / `set-entry` с `refs.moduleName`.
+4. Граф одного модуля → `set-module-data-flow`.
+5. Массовый пересчёт flow → `rebuild-data-flow`.
+6. После правок → `validate` (краткий отчёт и `issues[]`, без загрузки всего проекта).
+7. Категория (все API, домен) → `list-slices` → `get-slice`; при `hasMore` — `offset`.
+8. Поиск по имени → `search-entries` → `get-entry`.
+
+| Сценарий | Tool |
+|----------|------|
+| Модуль + его факты | `set-module-details` с `facts[]` |
+| Массовые факты | `set-entries` с `moduleName` |
+| Patch dataFlow одного модуля | `set-module-data-flow` |
+| Пересчитать все рёбра | `rebuild-data-flow` |
+| Проверка после правок | `validate` |
+| Рассинхрон index | `rebuild-entry-index` |
+| Проект с нуля | `set-project-architecture` с `replaceModules: true` |
+
+**Полная картина проекта:** одних модулей недостаточно для slices — без entries с `http-endpoint` срез `api` пуст. Новый модуль → `facts` или entries в том же шаге.
 
 ## Быстрый старт
 
@@ -238,13 +255,15 @@ npm run inspector
 
 ### set-project-architecture
 
-Создаёт или обновляет общую архитектуру проекта.
+Создаёт или обновляет общую архитектуру проекта. **По умолчанию merge** modules и dataFlow по имени; omit `dataFlow` сохраняет существующий flow. `dependsOn` — канон; `providesTo` пересчитывается при сохранении.
 
 **Вход:**
 - `projectId` (опц.): ID проекта (по умолчанию "default-project")
 - `description`: Описание проекта
 - `modules`: Массив модулей с полями `name`, `description`, `inputs`, `outputs`
-- `dataFlow` (опц.): Поток данных между модулями
+- `dataFlow` (опц.): Поток данных между модулями (omit — сохранить существующий)
+- `replaceModules` (опц.): Полная замена списка модулей (default `false` = merge)
+- `replaceDataFlow` (опц.): Полная замена dataFlow (default `false` = merge)
 
 **Выход:** ID проекта и сообщение об успехе
 
@@ -266,14 +285,16 @@ npm run inspector
 
 | Tool | Назначение |
 |------|------------|
-| `set-entry` | Upsert факта: `kind`, `title`, `summary`, `payload`, `refs`, `tags` |
+| `set-entry` | Upsert факта; в ответе `reminder`, если нет модулей или нет `refs.moduleName` |
+| `set-entries` | Массовый upsert (до 200); `moduleName` проставляет `refs.moduleName` |
 | `get-entry` | Полная entry по `id` |
 | `delete-entry` | Удаление |
 | `list-entries` | Каталог без payload |
 | `search-entries` | Поиск по тексту |
 | `list-slices` | Встроенные и custom срезы |
-| `get-slice` | Срез: `sliceId`, `format`, `query`, `limit` |
+| `get-slice` | Срез: `sliceId`, `format`, `query`, `limit`, `offset`, `hasMore` |
 | `set-slice` / `delete-slice` | Custom фильтр (без items) |
+| `rebuild-entry-index` | Пересборка `entries/index.json` |
 
 **Встроенные sliceId:** `api`, `persistence`, `events`, `domain`, `flows`, `integrations`, `config`, `runtime`, `decisions`, `scripts`.
 
@@ -281,7 +302,31 @@ npm run inspector
 
 ### set-module-details
 
-Создаёт или обновляет детали модуля.
+Создаёт или обновляет детали модуля. Срезы читают **entries**, не текст модуля — передавайте `facts[]` для API/домена в том же вызове. При `dependencies` синхронизирует `dataFlow.dependsOn`.
+
+### set-module-data-flow
+
+Patch `dataFlow` одного модуля: `moduleName`, `dependsOn`, `dataTransformation`, `syncInverse`.
+
+### rebuild-data-flow
+
+Пересборка `dataFlow` для всех модулей из `dependencies` в module files или из `dependsOn`. Замена массовой правки `architecture.json`.
+
+**Вход:** `source` (`module-dependencies` | `dataFlow-dependsOn`), `syncInverse`, `pruneOrphans`.
+
+**Выход:** `edgesAdded`, `edgesRemoved`, `modulesUpdated`.
+
+### validate
+
+**Главная проверка после правок.** Read-only отчёт для агента: `summary`, `stats`, `issuesByKind`, `issues[]` — не нужно тянуть весь проект.
+
+**Проверяет:** dataFlow, связь модуль↔entry, файлы модулей, рассинхрон index, пустые срезы api/domain/persistence.
+
+**Выход:** `valid`, `issueCount`, `summary`, `coverage`, `checksRun`.
+
+### validate-architecture
+
+То же, что `validate` (алиас). Предпочтительно вызывать `validate`.
 
 ### get-module-details
 

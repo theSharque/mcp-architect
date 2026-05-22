@@ -10,7 +10,7 @@ call() {
   local name="$1"
   local args="$2"
   local id="$3"
-  echo "=== ${name} ==="
+  echo "=== ${name} ===" >&2
   curl -sS -X POST "${BASE}/mcp" \
     -H 'Content-Type: application/json' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":${id},\"method\":\"tools/call\",\"params\":{\"name\":\"${name}\",\"arguments\":${args}}}" \
@@ -23,7 +23,7 @@ const chunks=[];process.stdin.on('data',d=>chunks.push(d));process.stdin.on('end
   const text=last?.result?.content?.[0]?.text;
   console.log(JSON.stringify(sc??text??last?.result,null,2));
 });"
-  echo
+  echo >&2
 }
 
 node scripts/mcp-http-bridge.mjs &
@@ -37,8 +37,18 @@ echo -e "\n"
 call list-projects '{"query":"architector"}' 10
 call get-project-architecture '{}' 11
 call list-modules '{}' 12
-call set-project-architecture '{"description":"MCP architector test project","modules":[{"name":"index","description":"Main server"}]}' 13
-call set-module-details '{"name":"index","description":"MCP server","inputs":"stdio","outputs":"tools","files":["src/index.ts"]}' 14
+call set-project-architecture '{"description":"MCP architector test project","replaceModules":true,"modules":[{"name":"index","description":"Main server"},{"name":"storage","description":"Storage layer"}],"dataFlow":{"index":{"dependsOn":["storage"]}}}' 13
+call set-project-architecture '{"description":"MCP architector test project","modules":[{"name":"index","description":"Main server updated"},{"name":"storage","description":"Storage layer"}]}' 30
+call get-project-architecture '{}' 31
+call set-module-details '{"name":"index","description":"MCP server","inputs":"stdio","outputs":"tools","dependencies":["storage"],"files":["src/index.ts"],"facts":[{"kind":"http-endpoint","title":"GET /health","summary":"Bridge health","payload":{"method":"GET","path":"/health"},"refs":{"files":["scripts/mcp-http-bridge.mjs"]}}]}' 14
+call set-entries '{"moduleName":"storage","entries":[{"kind":"entity","title":"ProjectArchitecture","summary":"Root architecture file","refs":{"files":["architecture.json"]}}]}' 35
+call validate '{}' 36
+call validate-architecture '{"checkEntryCoverage":true}' 39
+call rebuild-entry-index '{}' 37
+call get-slice '{"sliceId":"api","format":"compact","limit":5,"offset":0}' 38
+call set-module-data-flow '{"moduleName":"storage","dependsOn":[]}' 32
+call rebuild-data-flow '{}' 33
+call validate-architecture '{}' 34
 call get-module-details '{"moduleName":"index"}' 15
 call set-entry '{"kind":"http-endpoint","title":"GET /health","summary":"Bridge health check","payload":{"method":"GET","path":"/health"},"tags":["test"]}' 16
 call list-entries '{}' 17

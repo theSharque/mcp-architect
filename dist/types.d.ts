@@ -7,6 +7,19 @@ export interface EntryRefs {
     files?: string[];
     entryIds?: string[];
 }
+export interface ModuleFactInput {
+    kind: string;
+    title: string;
+    summary: string;
+    payload?: Record<string, unknown>;
+    refs?: Omit<EntryRefs, 'moduleName'>;
+    tags?: string[];
+}
+export interface UpsertFactsResult {
+    entriesCreated: number;
+    entriesUpdated: number;
+    entryIds: string[];
+}
 export interface Entry {
     id: string;
     kind: string;
@@ -107,6 +120,7 @@ export interface EntryFilter {
 export interface SliceBuildOptions {
     format: SliceFormat;
     limit: number;
+    offset?: number;
     query?: string;
     includeModuleContext?: boolean;
 }
@@ -127,6 +141,41 @@ export interface SliceResponse {
     format: SliceFormat;
     total: number;
     returned: number;
+    offset?: number;
+    hasMore?: boolean;
     items: CompactEntryRow[] | Entry[] | Record<string, unknown>[];
+}
+export interface EntryCoverageSummary {
+    modulesWithoutEntries: number;
+    entriesUnlinked: number;
+    entriesOrphanModule: number;
+    entriesWithoutModules: number;
+}
+export interface ValidationIssue {
+    kind: string;
+    module: string;
+    detail: string;
+}
+export interface ValidationStats {
+    moduleCount: number;
+    entryCount: number;
+    entryFilesOnDisk: number;
+    indexItemCount: number;
+}
+export interface ProjectValidationResult {
+    projectId: string;
+    valid: boolean;
+    issueCount: number;
+    summary: string;
+    stats: ValidationStats;
+    issuesByKind: Record<string, number>;
+    issues: ValidationIssue[];
+    coverage?: EntryCoverageSummary;
+    checksRun: string[];
+}
+export interface RebuildResult {
+    edgesAdded: number;
+    edgesRemoved: number;
+    modulesUpdated: number;
 }
 //# sourceMappingURL=types.d.ts.map

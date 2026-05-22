@@ -1,0 +1,189 @@
+import { promises as fs } from 'node:fs';
+import { validateDataFlow } from './data-flow.js';
+import { validateEntryCoverage } from './entry-coverage.js';
+import { BUILTIN_SLICES, countEntriesForKinds } from './slices.js';
+import { getEntriesDir, listModules, loadEntries, readArchitecture, readEntry, readEntryIndex, readModule, } from './storage.js';
+const SLICE_EMPTY_CHECK_IDS = ['api', 'domain', 'persistence'];
+async function countEntryFilesOnDisk(projectId) {
+    try {
+        const files = await fs.readdir(getEntriesDir(projectId));
+        return files.filter((f) => f.endsWith('.json') && f !== 'index.json').length;
+    }
+    catch {
+        return 0;
+    }
+}
+function validateModuleFiles(architecture, moduleDetailsMap, moduleFileIds) {
+    const issues = [];
+    if (!architecture) {
+        return issues;
+    }
+    const archIds = new Set(architecture.modules.map((m) => m.id));
+    for (const mod of architecture.modules) {
+        if (!moduleDetailsMap.has(mod.name)) {
+            issues.push({
+                kind: 'missing-module-details',
+                module: mod.name,
+                detail: `Module '${mod.name}' is in architecture but has no modules/${mod.id}.json—call set-module-details`,
+            });
+        }
+    }
+    for (const fileId of moduleFileIds) {
+        if (!archIds.has(fileId)) {
+            issues.push({
+                kind: 'orphan-module-file',
+                module: fileId,
+                detail: `Orphan module file modules/${fileId}.json—not listed in architecture.modules`,
+            });
+        }
+    }
+    return issues;
+}
+async function validateEntryIndexDrift(projectId) {
+    const issues = [];
+    const index = await readEntryIndex(projectId);
+    const onDisk = await countEntryFilesOnDisk(projectId);
+    if (index.items.length !== onDisk) {
+        issues.push({
+            kind: 'index-count-mismatch',
+            module: '',
+            detail: `entries/index.json has ${index.items.length} items but ${onDisk} entry files on disk—run rebuild-entry-index`,
+        });
+    }
+    for (const item of index.items) {
+        const entry = await readEntry(projectId, item.id);
+        if (!entry) {
+            issues.push({
+                kind: 'index-missing-entry-file',
+                module: item.id,
+                detail: `Index references entry id '${item.id}' but file is missing or unreadable`,
+            });
+        }
+    }
+    return issues;
+}
+function validateEmptyBuiltinSlices(architecture, indexItems) {
+    const issues = [];
+    if (!architecture || architecture.modules.length === 0) {
+        return issues;
+    }
+    for (const sliceId of SLICE_EMPTY_CHECK_IDS) {
+        const builtin = BUILTIN_SLICES.find((b) => b.id === sliceId);
+        if (!builtin) {
+            continue;
+        }
+        const count = countEntriesForKinds(indexItems, builtin.kinds);
+        if (count === 0) {
+            issues.push({
+                kind: 'slice-empty',
+                module: sliceId,
+                detail: `Built-in slice '${sliceId}' has 0 entries (kinds: ${builtin.kinds.slice(0, 3).join(', ')}…)—add facts or set-entry with matching kinds`,
+            });
+        }
+    }
+    return issues;
+}
+function groupIssuesByKind(issues) {
+    const map = {};
+    for (const issue of issues) {
+        map[issue.kind] = (map[issue.kind] ?? 0) + 1;
+    }
+    return map;
+}
+function buildSummary(valid, issueCount, issuesByKind) {
+    if (valid) {
+        return 'Project validation passed: modules, entries, dataFlow, and index are consistent.';
+    }
+    const top = Object.entries(issuesByKind)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([k, n]) => `${k}(${n})`)
+        .join(', ');
+    return `Validation failed: ${issueCount} issue(s). Top kinds: ${top}. Fix issues[] then run validate again.`;
+}
+async function loadModuleDetailsMap(projectId, architecture) {
+    const map = new Map();
+    for (const mod of architecture.modules) {
+        const details = await readModule(projectId, mod.id);
+        if (details) {
+            map.set(mod.name, details);
+        }
+    }
+    return map;
+}
+export async function runProjectValidation(projectId, options = {}) {
+    const checkInverse = options.checkInverse ?? true;
+    const checkModuleDeps = options.checkModuleDeps ?? true;
+    const checkEntryCoverage = options.checkEntryCoverage ?? true;
+    const checkStorage = options.checkStorage ?? true;
+    const checkEmptySlices = options.checkEmptySlices ?? true;
+    const checksRun = [];
+    const architecture = await readArchitecture(projectId);
+    const moduleDetailsMap = architecture
+        ? await loadModuleDetailsMap(projectId, architecture)
+        : new Map();
+    const entries = await loadEntries(projectId);
+    const index = await readEntryIndex(projectId);
+    const entryFilesOnDisk = await countEntryFilesOnDisk(projectId);
+    const moduleFileIds = await listModules(projectId);
+    const issues = [];
+    let coverage;
+    if (!architecture) {
+        checksRun.push('architecture-presence');
+        issues.push({
+            kind: 'missing-architecture',
+            module: '',
+            detail: 'No architecture found—call set-project-architecture',
+        });
+        if (checkEntryCoverage && entries.length > 0) {
+            checksRun.push('entry-coverage');
+            const entryResult = validateEntryCoverage(null, entries, moduleDetailsMap);
+            issues.push(...entryResult.issues);
+            coverage = entryResult.coverage;
+        }
+    }
+    else {
+        checksRun.push('dataFlow');
+        issues.push(...validateDataFlow(architecture, moduleDetailsMap, {
+            checkInverse,
+            checkModuleDeps,
+        }));
+        if (checkEntryCoverage) {
+            checksRun.push('entry-coverage');
+            const entryResult = validateEntryCoverage(architecture, entries, moduleDetailsMap);
+            issues.push(...entryResult.issues);
+            coverage = entryResult.coverage;
+        }
+        if (checkStorage) {
+            checksRun.push('module-files');
+            issues.push(...validateModuleFiles(architecture, moduleDetailsMap, moduleFileIds));
+        }
+    }
+    if (checkStorage) {
+        checksRun.push('entry-index');
+        issues.push(...(await validateEntryIndexDrift(projectId)));
+    }
+    if (checkEmptySlices) {
+        checksRun.push('empty-slices');
+        issues.push(...validateEmptyBuiltinSlices(architecture, index.items));
+    }
+    const issuesByKind = groupIssuesByKind(issues);
+    const valid = issues.length === 0;
+    return {
+        projectId,
+        valid,
+        issueCount: issues.length,
+        summary: buildSummary(valid, issues.length, issuesByKind),
+        stats: {
+            moduleCount: architecture?.modules.length ?? 0,
+            entryCount: entries.length,
+            entryFilesOnDisk,
+            indexItemCount: index.items.length,
+        },
+        issuesByKind,
+        issues,
+        coverage,
+        checksRun,
+    };
+}
+//# sourceMappingURL=project-validate.js.map

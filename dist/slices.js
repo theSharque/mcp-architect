@@ -172,13 +172,21 @@ export function clampLimit(limit) {
     }
     return Math.min(limit, MAX_LIMIT);
 }
+export function clampOffset(offset) {
+    if (offset === undefined || offset < 0) {
+        return 0;
+    }
+    return Math.floor(offset);
+}
 export function buildSliceResponse(sliceId, sliceTitle, entries, options, architecture) {
     const limit = clampLimit(options.limit);
+    const offset = clampOffset(options.offset);
     const filtered = options.query
         ? entries.filter((e) => matchesEntryFilter(e, { query: options.query }))
         : entries;
     const sorted = [...filtered].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    const slice = sorted.slice(0, limit);
+    const slice = sorted.slice(offset, offset + limit);
+    const hasMore = offset + slice.length < filtered.length;
     if (options.format === 'detail') {
         const items = options.includeModuleContext
             ? slice.map((entry) => {
@@ -196,6 +204,8 @@ export function buildSliceResponse(sliceId, sliceTitle, entries, options, archit
             format: 'detail',
             total: filtered.length,
             returned: items.length,
+            offset,
+            hasMore,
             items: items,
         };
     }
@@ -206,6 +216,8 @@ export function buildSliceResponse(sliceId, sliceTitle, entries, options, archit
             format: 'table',
             total: filtered.length,
             returned: slice.length,
+            offset,
+            hasMore,
             items: slice.map(entryToTableRow),
         };
     }
@@ -219,6 +231,8 @@ export function buildSliceResponse(sliceId, sliceTitle, entries, options, archit
         format: 'compact',
         total: filtered.length,
         returned: items.length,
+        offset,
+        hasMore,
         items,
     };
 }

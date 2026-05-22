@@ -6,10 +6,24 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
-import { readArchitecture, writeArchitecture, readModule, writeModule, deleteModule, listProjects, normalizeProjectId, } from "./storage.js";
+import { readArchitecture, writeArchitecture, readModule, writeModule, deleteModule, listProjects, normalizeProjectId, rebuildEntryIndex, } from "./storage.js";
 import { registerEntriesAndSlicesTools } from "./tools-entries-slices.js";
+import { MODULE_ENTRIES_REMINDER, suggestKindsFromFiles } from "./agent-hints.js";
+import { upsertFacts } from "./entry-sync.js";
+import { runProjectValidation } from "./project-validate.js";
+import { buildDataFlowFromDependsOn, buildDataFlowFromModules, diffFlowEdges, mergeDataFlow, mergeModules, pruneDataFlow, recomputeProvidesTo, removeModuleFromDataFlow, syncModuleDependsOn, } from "./data-flow.js";
 function resolveProjectId(provided) {
     return provided || globalProjectId || "default-project";
+}
+async function loadModuleDetailsMap(projectId, architecture) {
+    const map = new Map();
+    for (const mod of architecture.modules) {
+        const details = await readModule(projectId, mod.id);
+        if (details) {
+            map.set(mod.name, details);
+        }
+    }
+    return map;
 }
 const packageJson = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../package.json"), "utf-8"));
 const server = new McpServer({
@@ -29,7 +43,7 @@ if (envProjectId) {
  */
 server.registerTool("set-project-architecture", {
     title: "Set Project Architecture",
-    description: "Creates or replaces vertical module structure (components and dataFlow)—not horizontal facts. Overwrites the full modules list and dataFlow on each call; pass every module you want to keep. For one module use set-module-details. For APIs, domain terms, scripts use set-entry + get-slice—not this tool. If projectId is wrong, call list-projects first. Do not duplicate entry text in module descriptions.",
+    description: "Creates or updates vertical module structure (components and dataFlow)—not horizontal facts. By default merges modules and dataFlow by name; omit dataFlow to keep existing flow. Use replaceModules or replaceDataFlow for full replace. For one module use set-module-details or set-module-data-flow. For bulk flow rebuild use rebuild-data-flow. Each new module still needs entries—use set-module-details with facts[] or set-entries after bulk structure. For APIs, domain terms, scripts use set-entry + get-slice—not this tool. If projectId is wrong, call list-projects first. Do not duplicate entry text in module descriptions.",
     inputSchema: {
         projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
         description: z.string().describe("Overall project description"),
@@ -43,13 +57,15 @@ server.registerTool("set-project-architecture", {
             dependsOn: z.array(z.string()).optional().describe("Modules this module depends on"),
             providesTo: z.array(z.string()).optional().describe("Modules that receive data from this module"),
             dataTransformation: z.string().optional().describe("How data is transformed between modules"),
-        })).optional().describe("Data flow between modules"),
+        })).optional().describe("Data flow between modules; omit to preserve existing"),
+        replaceModules: z.boolean().optional().describe("Replace entire modules list (default false = merge by name)"),
+        replaceDataFlow: z.boolean().optional().describe("Replace entire dataFlow (default false = merge by module name)"),
     },
     outputSchema: {
         projectId: z.string(),
         message: z.string(),
     },
-}, async ({ description, modules, dataFlow, projectId: providedProjectId }) => {
+}, async ({ description, modules, dataFlow, replaceModules, replaceDataFlow, projectId: providedProjectId }) => {
     const projectId = resolveProjectId(providedProjectId);
     const existing = await readArchitecture(projectId);
     const now = new Date().toISOString();
@@ -65,11 +81,21 @@ server.registerTool("set-project-architecture", {
             updatedAt: now,
         };
     });
+    const mergedModules = mergeModules(existing?.modules, moduleSummaries, {
+        replace: replaceModules ?? false,
+    });
+    const moduleNames = mergedModules.map((m) => m.name);
+    let mergedFlow = mergeDataFlow(existing?.dataFlow, dataFlow, {
+        replace: replaceDataFlow ?? false,
+    });
+    if (mergedFlow) {
+        mergedFlow = recomputeProvidesTo(mergedFlow, moduleNames);
+    }
     const architecture = {
         projectId,
         description,
-        modules: moduleSummaries,
-        dataFlow: dataFlow,
+        modules: mergedModules,
+        dataFlow: mergedFlow,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
     };
@@ -83,7 +109,7 @@ server.registerTool("set-project-architecture", {
         ],
         structuredContent: {
             projectId,
-            message: `Architecture updated with ${modules.length} modules`,
+            message: `Architecture updated with ${mergedModules.length} modules`,
         },
     };
 });
@@ -153,9 +179,23 @@ server.registerTool("list-projects", {
 /**
  * Tool: Set module details
  */
+const moduleFactRefsSchema = z
+    .object({
+    files: z.array(z.string()).optional(),
+    entryIds: z.array(z.string()).optional(),
+})
+    .optional();
+const moduleFactSchema = z.object({
+    kind: z.string(),
+    title: z.string(),
+    summary: z.string(),
+    payload: z.record(z.string(), z.unknown()).optional(),
+    refs: moduleFactRefsSchema,
+    tags: z.array(z.string()).optional(),
+});
 server.registerTool("set-module-details", {
     title: "Set Module Details",
-    description: "Creates or updates one vertical module (component): files, dependencies, usage examples, synced to architecture summary. Use for structural ownership—not for listing every API (use set-entry). Does not replace other modules. Prefer over set-project-architecture for single-module edits. Link entries via refs.moduleName; do not paste the same text into entries.",
+    description: "Creates or updates one vertical module (files, dependencies, dataFlow sync). IMPORTANT: Slices (api, domain, persistence) are built from entries, not from module text. When adding or updating a module, also add entries this module owns: pass facts[] (http-endpoint, entity, glossary, …) in this call, or call set-entry / set-entries with refs.moduleName=<module name>. Without entries, get-slice will be empty for this module. After edits call validate to verify links. Does not replace other modules. Prefer over set-project-architecture for single-module edits.",
     inputSchema: {
         projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
         name: z.string().describe("Module name"),
@@ -163,7 +203,14 @@ server.registerTool("set-module-details", {
         inputs: z.string().describe("What the module accepts as input"),
         outputs: z.string().describe("What the module produces as output"),
         dependencies: z.array(z.string()).optional().describe("List of module dependencies"),
-        files: z.array(z.string()).optional().describe("List of files belonging to this module"),
+        files: z
+            .array(z.string())
+            .optional()
+            .describe("Files belonging to this module; add matching entry kinds per Controller/Repository"),
+        facts: z
+            .array(moduleFactSchema)
+            .optional()
+            .describe("Horizontal facts for this module (APIs, entities, terms). Preferred over separate set-entry calls. Each becomes an entry with refs.moduleName set automatically. Omit only for skeleton modules."),
         usageExamples: z.array(z.object({
             title: z.string().describe("Example title"),
             description: z.string().optional().describe("Description of the example"),
@@ -177,21 +224,27 @@ server.registerTool("set-module-details", {
     outputSchema: {
         moduleId: z.string(),
         message: z.string(),
+        entriesCreated: z.number().optional(),
+        entriesUpdated: z.number().optional(),
+        entryIds: z.array(z.string()).optional(),
+        reminder: z.string().optional(),
+        suggestedKinds: z.array(z.string()).optional(),
     },
-}, async ({ name, description, inputs, outputs, dependencies, files, usageExamples, notes, projectId: providedProjectId }) => {
+}, async ({ name, description, inputs, outputs, dependencies, files, usageExamples, notes, facts, projectId: providedProjectId }) => {
     const projectId = resolveProjectId(providedProjectId);
-    // Get or generate module ID
+    const now = new Date().toISOString();
     const architecture = await readArchitecture(projectId);
     let moduleId;
+    let existingDetails = null;
     if (architecture) {
         const existingModule = architecture.modules.find((m) => m.name === name);
         moduleId = existingModule ? existingModule.id : uuidv4();
-        // Update or add module to architecture
+        existingDetails = await readModule(projectId, moduleId);
         if (existingModule) {
             existingModule.description = description;
             existingModule.inputs = inputs;
             existingModule.outputs = outputs;
-            existingModule.updatedAt = new Date().toISOString();
+            existingModule.updatedAt = now;
         }
         else {
             architecture.modules.push({
@@ -200,11 +253,14 @@ server.registerTool("set-module-details", {
                 description,
                 inputs,
                 outputs,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
+                createdAt: now,
+                updatedAt: now,
             });
         }
-        architecture.updatedAt = new Date().toISOString();
+        if (dependencies !== undefined) {
+            architecture.dataFlow = syncModuleDependsOn(architecture.dataFlow ?? {}, name, dependencies, architecture.modules.map((m) => m.name));
+        }
+        architecture.updatedAt = now;
         await writeArchitecture(projectId, architecture);
     }
     else {
@@ -216,25 +272,55 @@ server.registerTool("set-module-details", {
         description,
         inputs,
         outputs,
-        dependencies: dependencies || [],
-        files: files || [],
-        usageExamples: usageExamples || [],
-        notes: notes || "",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        dependencies: dependencies ?? existingDetails?.dependencies ?? [],
+        files: files ?? existingDetails?.files ?? [],
+        usageExamples: usageExamples ?? existingDetails?.usageExamples ?? [],
+        notes: notes ?? existingDetails?.notes ?? "",
+        createdAt: existingDetails?.createdAt ?? now,
+        updatedAt: now,
     };
     await writeModule(projectId, moduleDetails);
+    let entriesCreated = 0;
+    let entriesUpdated = 0;
+    let entryIds = [];
+    if (facts?.length) {
+        const upsert = await upsertFacts(projectId, facts, name);
+        entriesCreated = upsert.entriesCreated;
+        entriesUpdated = upsert.entriesUpdated;
+        entryIds = upsert.entryIds;
+    }
+    const moduleFiles = moduleDetails.files ?? [];
+    const suggestedKinds = suggestKindsFromFiles(moduleFiles);
+    const needsReminder = entriesCreated + entriesUpdated === 0;
+    const structuredContent = {
+        moduleId,
+        message: `Module '${name}' saved successfully`,
+        entriesCreated,
+        entriesUpdated,
+        entryIds,
+    };
+    if (needsReminder) {
+        structuredContent.reminder = MODULE_ENTRIES_REMINDER;
+        if (suggestedKinds.length > 0) {
+            structuredContent.suggestedKinds = suggestedKinds;
+        }
+    }
+    else {
+        structuredContent.message = `Module '${name}' saved with ${entriesCreated + entriesUpdated} linked entries`;
+    }
+    const textParts = [`Module details saved: ${name}`];
+    if (entriesCreated + entriesUpdated > 0) {
+        textParts.push(`Entries: ${entriesCreated} created, ${entriesUpdated} updated`);
+    }
+    if (needsReminder) {
+        textParts.push(MODULE_ENTRIES_REMINDER);
+        if (suggestedKinds.length > 0) {
+            textParts.push(`Suggested kinds: ${suggestedKinds.join(", ")}`);
+        }
+    }
     return {
-        content: [
-            {
-                type: "text",
-                text: `Module details saved: ${name}`,
-            },
-        ],
-        structuredContent: {
-            moduleId,
-            message: `Module '${name}' saved successfully`,
-        },
+        content: [{ type: "text", text: textParts.join("\n") }],
+        structuredContent,
     };
 });
 /**
@@ -242,7 +328,7 @@ server.registerTool("set-module-details", {
  */
 server.registerTool("get-module-details", {
     title: "Get Module Details",
-    description: "Returns one module's full detail (files, dependencies, examples). Use when you know the module name from get-project-architecture or list-modules. For cross-cutting API/domain lists use get-slice. moduleName must match architecture exactly.",
+    description: "Returns one module's full detail (files, dependencies, examples). Use when you know the module name from get-project-architecture or list-modules. If module has files but get-slice is empty, add entries with refs.moduleName=this module. For cross-cutting API/domain lists use get-slice. moduleName must match architecture exactly.",
     inputSchema: {
         projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
         moduleName: z.string().describe("Name of the module to retrieve"),
@@ -311,7 +397,7 @@ server.registerTool("get-module-details", {
  */
 server.registerTool("list-modules", {
     title: "List All Modules",
-    description: "Lists module summaries from architecture (name, description)—vertical structure only. For horizontal facts (endpoints, tables, terms) use list-slices then get-slice. Use module names in set-entry refs.moduleName.",
+    description: "Lists module summaries from architecture (name, description)—vertical structure only. For horizontal facts (endpoints, tables, terms) use list-slices then get-slice. After edits run validate. Use module names in set-entry refs.moduleName.",
     inputSchema: {
         projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
     },
@@ -343,6 +429,253 @@ server.registerTool("list-modules", {
         ],
         structuredContent: {
             modules: architecture.modules,
+        },
+    };
+});
+server.registerTool("set-module-data-flow", {
+    title: "Set Module Data Flow",
+    description: "Patches dataFlow for one module (dependsOn is canonical; providesTo is recomputed). Syncs module file dependencies. Prefer over set-project-architecture for single-module graph edits.",
+    inputSchema: {
+        projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+        moduleName: z.string().describe("Module name"),
+        dependsOn: z.array(z.string()).optional().describe("Modules this module depends on"),
+        dataTransformation: z.string().optional().describe("How data is transformed between modules"),
+        syncInverse: z.boolean().optional().describe("Recompute providesTo from dependsOn (default true)"),
+    },
+    outputSchema: {
+        moduleName: z.string(),
+        message: z.string(),
+    },
+}, async ({ moduleName, dependsOn, dataTransformation, syncInverse, projectId: providedProjectId }) => {
+    const projectId = resolveProjectId(providedProjectId);
+    const architecture = await readArchitecture(projectId);
+    if (!architecture) {
+        return {
+            content: [{ type: "text", text: `No architecture found for project: ${projectId}` }],
+            structuredContent: { moduleName, message: `Architecture not found for project: ${projectId}` },
+        };
+    }
+    const mod = architecture.modules.find((m) => m.name === moduleName);
+    if (!mod) {
+        return {
+            content: [{ type: "text", text: `Module '${moduleName}' not found` }],
+            structuredContent: { moduleName, message: `Module '${moduleName}' not found` },
+        };
+    }
+    const moduleNames = architecture.modules.map((m) => m.name);
+    const flow = { ...(architecture.dataFlow ?? {}) };
+    const entry = { ...(flow[moduleName] ?? {}) };
+    if (dependsOn !== undefined) {
+        entry.dependsOn = dependsOn;
+    }
+    if (dataTransformation !== undefined) {
+        entry.dataTransformation = dataTransformation;
+    }
+    flow[moduleName] = entry;
+    architecture.dataFlow =
+        syncInverse ?? true
+            ? recomputeProvidesTo(flow, moduleNames)
+            : flow;
+    architecture.updatedAt = new Date().toISOString();
+    await writeArchitecture(projectId, architecture);
+    if (dependsOn !== undefined) {
+        const existingDetails = await readModule(projectId, mod.id);
+        const now = new Date().toISOString();
+        await writeModule(projectId, {
+            moduleId: mod.id,
+            name: moduleName,
+            description: existingDetails?.description ?? mod.description,
+            inputs: existingDetails?.inputs ?? mod.inputs ?? "",
+            outputs: existingDetails?.outputs ?? mod.outputs ?? "",
+            dependencies: dependsOn,
+            files: existingDetails?.files ?? [],
+            usageExamples: existingDetails?.usageExamples ?? [],
+            notes: existingDetails?.notes ?? "",
+            createdAt: existingDetails?.createdAt ?? now,
+            updatedAt: now,
+        });
+    }
+    return {
+        content: [{ type: "text", text: `Data flow updated for module: ${moduleName}` }],
+        structuredContent: { moduleName, message: `Data flow updated for module '${moduleName}'` },
+    };
+});
+server.registerTool("rebuild-data-flow", {
+    title: "Rebuild Data Flow",
+    description: "Rebuilds dataFlow for all modules from module file dependencies or existing dependsOn edges. Recomputes providesTo and optionally syncs module files. Use instead of editing architecture.json directly.",
+    inputSchema: {
+        projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+        source: z
+            .enum(["module-dependencies", "dataFlow-dependsOn"])
+            .optional()
+            .describe("Source for dependsOn edges (default module-dependencies)"),
+        syncInverse: z.boolean().optional().describe("Recompute providesTo (default true)"),
+        pruneOrphans: z.boolean().optional().describe("Remove invalid module references (default true)"),
+    },
+    outputSchema: {
+        edgesAdded: z.number(),
+        edgesRemoved: z.number(),
+        modulesUpdated: z.number(),
+        message: z.string(),
+    },
+}, async ({ source, syncInverse, pruneOrphans, projectId: providedProjectId }) => {
+    const projectId = resolveProjectId(providedProjectId);
+    const architecture = await readArchitecture(projectId);
+    if (!architecture) {
+        return {
+            content: [{ type: "text", text: `No architecture found for project: ${projectId}` }],
+            structuredContent: {
+                edgesAdded: 0,
+                edgesRemoved: 0,
+                modulesUpdated: 0,
+                message: `Architecture not found for project: ${projectId}`,
+            },
+        };
+    }
+    const moduleNames = architecture.modules.map((m) => m.name);
+    const moduleDetailsMap = await loadModuleDetailsMap(projectId, architecture);
+    const beforeFlow = architecture.dataFlow;
+    let rebuilt;
+    if ((source ?? "module-dependencies") === "module-dependencies") {
+        rebuilt = buildDataFlowFromModules(architecture.modules, moduleDetailsMap);
+    }
+    else {
+        rebuilt = buildDataFlowFromDependsOn(architecture.dataFlow ?? {}, moduleNames);
+    }
+    if (pruneOrphans ?? true) {
+        rebuilt = pruneDataFlow(rebuilt, moduleNames);
+    }
+    else if (syncInverse ?? true) {
+        rebuilt = recomputeProvidesTo(rebuilt, moduleNames);
+    }
+    const { edgesAdded, edgesRemoved } = diffFlowEdges(beforeFlow, rebuilt);
+    architecture.dataFlow = Object.keys(rebuilt).length > 0 ? rebuilt : undefined;
+    architecture.updatedAt = new Date().toISOString();
+    await writeArchitecture(projectId, architecture);
+    let modulesUpdated = 0;
+    const now = new Date().toISOString();
+    for (const mod of architecture.modules) {
+        const dependsOn = rebuilt[mod.name]?.dependsOn ?? [];
+        const existing = moduleDetailsMap.get(mod.name);
+        const existingDeps = [...(existing?.dependencies ?? [])].sort();
+        const nextDeps = [...dependsOn].sort();
+        const same = nextDeps.length === existingDeps.length &&
+            nextDeps.every((d, i) => d === existingDeps[i]);
+        if (same) {
+            continue;
+        }
+        await writeModule(projectId, {
+            moduleId: mod.id,
+            name: mod.name,
+            description: existing?.description ?? mod.description,
+            inputs: existing?.inputs ?? mod.inputs ?? "",
+            outputs: existing?.outputs ?? mod.outputs ?? "",
+            dependencies: dependsOn,
+            files: existing?.files ?? [],
+            usageExamples: existing?.usageExamples ?? [],
+            notes: existing?.notes ?? "",
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: now,
+        });
+        modulesUpdated++;
+    }
+    const message = `Rebuilt dataFlow: +${edgesAdded} -${edgesRemoved} edges, ${modulesUpdated} module files synced`;
+    return {
+        content: [{ type: "text", text: message }],
+        structuredContent: { edgesAdded, edgesRemoved, modulesUpdated, message },
+    };
+});
+const validationIssueSchema = z.object({
+    kind: z.string(),
+    module: z.string(),
+    detail: z.string(),
+});
+const validationOutputSchema = {
+    valid: z.boolean(),
+    issueCount: z.number(),
+    summary: z.string(),
+    stats: z.object({
+        moduleCount: z.number(),
+        entryCount: z.number(),
+        entryFilesOnDisk: z.number(),
+        indexItemCount: z.number(),
+    }),
+    issuesByKind: z.record(z.string(), z.number()),
+    issues: z.array(validationIssueSchema),
+    coverage: z
+        .object({
+        modulesWithoutEntries: z.number(),
+        entriesUnlinked: z.number(),
+        entriesOrphanModule: z.number(),
+        entriesWithoutModules: z.number(),
+    })
+        .optional(),
+    checksRun: z.array(z.string()),
+};
+const validationInputSchema = {
+    projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+    checkInverse: z.boolean().optional().describe("Check providesTo vs dependsOn inverse (default true)"),
+    checkModuleDeps: z.boolean().optional().describe("Check module.dependencies vs dataFlow.dependsOn (default true)"),
+    checkEntryCoverage: z.boolean().optional().describe("Check modules vs entries linkage (default true)"),
+    checkStorage: z
+        .boolean()
+        .optional()
+        .describe("Check module files on disk and entry index drift (default true)"),
+    checkEmptySlices: z
+        .boolean()
+        .optional()
+        .describe("Warn when api/domain/persistence slices have zero entries but modules exist (default true)"),
+};
+async function runValidationTool(params) {
+    const projectId = resolveProjectId(params.projectId);
+    const result = await runProjectValidation(projectId, {
+        checkInverse: params.checkInverse,
+        checkModuleDeps: params.checkModuleDeps,
+        checkEntryCoverage: params.checkEntryCoverage,
+        checkStorage: params.checkStorage,
+        checkEmptySlices: params.checkEmptySlices,
+    });
+    const text = `${result.summary}\n\n${JSON.stringify(result, null, 2)}`;
+    return {
+        content: [{ type: "text", text }],
+        structuredContent: { ...result },
+    };
+}
+server.registerTool("validate", {
+    title: "Validate Project",
+    description: "Run after set-project-architecture, set-module-details, set-entry, or set-entries. Returns a compact report (summary, stats, issues by kind)—no need to load the full project in the agent. Checks only known rules: dataFlow consistency, module↔entry links, module detail files, entry index drift, empty api/domain/persistence slices. Fix issues[] then call validate again.",
+    inputSchema: validationInputSchema,
+    outputSchema: validationOutputSchema,
+}, async (params) => runValidationTool(params));
+server.registerTool("validate-architecture", {
+    title: "Validate Architecture",
+    description: "Alias for validate with the same checks. Prefer validate after edits. Legacy name kept for compatibility.",
+    inputSchema: validationInputSchema,
+    outputSchema: validationOutputSchema,
+}, async (params) => runValidationTool(params));
+server.registerTool("rebuild-entry-index", {
+    title: "Rebuild Entry Index",
+    description: "Rebuilds entries/index.json from entry files on disk. Use when list-entries or get-slice miss entries that exist as files (index drift). Does not modify entry bodies.",
+    inputSchema: {
+        projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+    },
+    outputSchema: {
+        itemCount: z.number(),
+        message: z.string(),
+    },
+}, async ({ projectId: providedProjectId }) => {
+    const projectId = resolveProjectId(providedProjectId);
+    const index = await rebuildEntryIndex(projectId);
+    return {
+        content: [
+            {
+                type: "text",
+                text: `Entry index rebuilt: ${index.items.length} items`,
+            },
+        ],
+        structuredContent: {
+            itemCount: index.items.length,
+            message: `Rebuilt index with ${index.items.length} entries`,
         },
     };
 });
@@ -391,8 +724,12 @@ server.registerTool("delete-module", {
     }
     // Delete module details file
     await deleteModule(projectId, module.id);
-    // Remove from architecture
-    architecture.modules = architecture.modules.filter(m => m.id !== module.id);
+    architecture.modules = architecture.modules.filter((m) => m.id !== module.id);
+    const moduleNames = architecture.modules.map((m) => m.name);
+    architecture.dataFlow = removeModuleFromDataFlow(architecture.dataFlow, moduleName);
+    if (architecture.dataFlow && moduleNames.length > 0) {
+        architecture.dataFlow = recomputeProvidesTo(architecture.dataFlow, moduleNames);
+    }
     architecture.updatedAt = new Date().toISOString();
     await writeArchitecture(projectId, architecture);
     return {

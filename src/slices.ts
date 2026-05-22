@@ -202,6 +202,13 @@ export function clampLimit(limit?: number): number {
   return Math.min(limit, MAX_LIMIT);
 }
 
+export function clampOffset(offset?: number): number {
+  if (offset === undefined || offset < 0) {
+    return 0;
+  }
+  return Math.floor(offset);
+}
+
 export function buildSliceResponse(
   sliceId: string,
   sliceTitle: string,
@@ -210,6 +217,7 @@ export function buildSliceResponse(
   architecture: ProjectArchitecture | null
 ): SliceResponse {
   const limit = clampLimit(options.limit);
+  const offset = clampOffset(options.offset);
   const filtered = options.query
     ? entries.filter((e) =>
         matchesEntryFilter(e, { query: options.query })
@@ -220,7 +228,8 @@ export function buildSliceResponse(
     (a, b) =>
       new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   );
-  const slice = sorted.slice(0, limit);
+  const slice = sorted.slice(offset, offset + limit);
+  const hasMore = offset + slice.length < filtered.length;
 
   if (options.format === 'detail') {
     const items = options.includeModuleContext
@@ -240,6 +249,8 @@ export function buildSliceResponse(
       format: 'detail',
       total: filtered.length,
       returned: items.length,
+      offset,
+      hasMore,
       items: items as Entry[],
     };
   }
@@ -251,6 +262,8 @@ export function buildSliceResponse(
       format: 'table',
       total: filtered.length,
       returned: slice.length,
+      offset,
+      hasMore,
       items: slice.map(entryToTableRow),
     };
   }
@@ -266,6 +279,8 @@ export function buildSliceResponse(
     format: 'compact',
     total: filtered.length,
     returned: items.length,
+    offset,
+    hasMore,
     items,
   };
 }

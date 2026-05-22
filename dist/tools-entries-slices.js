@@ -1,14 +1,16 @@
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
-import { BUILTIN_SLICES, buildSliceResponse, clampLimit, countEntriesForKinds, getBuiltinSlice, resolveSliceFilter, } from "./slices.js";
+import { BUILTIN_SLICES, buildSliceResponse, clampLimit, clampOffset, countEntriesForKinds, getBuiltinSlice, resolveSliceFilter, } from "./slices.js";
 import { deleteEntry, deleteSlice, filterIndexItems, findEntryByKindTitle, loadEntries, readArchitecture, readEntry, readEntryIndex, readSlice, writeEntry, writeSlice, listSliceIds, } from "./storage.js";
 import { migrateScriptsToEntries } from "./migrate-scripts.js";
+import { ENTRIES_MODULE_REMINDER, buildEntryLinkHints } from "./agent-hints.js";
+import { MAX_BULK_ENTRIES, upsertFacts } from "./entry-sync.js";
 const entryRefsSchema = z
     .object({
     moduleName: z
         .string()
         .optional()
-        .describe("Module name from list-modules only. Do not paste module description here—link by name."),
+        .describe("Module name from list-modules. Required when project has modules. Do not paste module description here—link by name."),
     files: z
         .array(z.string())
         .optional()
@@ -19,13 +21,60 @@ const entryRefsSchema = z
         .describe("Related entry ids, e.g. flow steps pointing to other entries"),
 })
     .optional();
+const moduleFactRefsSchema = z
+    .object({
+    files: z.array(z.string()).optional(),
+    entryIds: z.array(z.string()).optional(),
+})
+    .optional();
+export const moduleFactSchema = z.object({
+    kind: z.string(),
+    title: z.string(),
+    summary: z.string(),
+    payload: z.record(z.string(), z.unknown()).optional(),
+    refs: moduleFactRefsSchema,
+    tags: z.array(z.string()).optional(),
+});
+async function saveSingleEntry(projectId, params) {
+    const now = new Date().toISOString();
+    let existing = null;
+    if (params.id) {
+        existing = await readEntry(projectId, params.id);
+    }
+    else {
+        existing = await findEntryByKindTitle(projectId, params.kind, params.title);
+    }
+    const entryId = params.id ?? existing?.id ?? uuidv4();
+    const entry = {
+        id: entryId,
+        kind: params.kind,
+        title: params.title,
+        summary: params.summary,
+        payload: params.payload,
+        refs: params.refs,
+        tags: params.tags,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+    };
+    await writeEntry(projectId, entry);
+    return entry;
+}
+function entryLinkStructuredContent(entryId, entry, architecture) {
+    const moduleNames = architecture?.modules.map((m) => m.name) ?? [];
+    const linkHints = buildEntryLinkHints(moduleNames, entry.refs?.moduleName);
+    return {
+        entryId,
+        message: `Entry '${entry.title}' saved`,
+        ...linkHints,
+    };
+}
 export function registerEntriesAndSlicesTools(server, resolveProjectId) {
     async function ensureMigrated(projectId) {
         await migrateScriptsToEntries(projectId);
     }
     server.registerTool("set-entry", {
         title: "Set Entry",
-        description: "Creates or updates one canonical project fact (entry)—single source of truth for APIs, domain terms, flows, scripts, etc. Use when you discovered a concrete fact while working (endpoint, table, glossary term). Do not use for module structure—use set-module-details. Do not copy module.description into summary; link via refs.moduleName only. Upsert: pass id to update, or omit id to match by kind+title or create new. Example: kind=http-endpoint, title='POST /orders', summary='Creates order', refs.files=['src/OrderController.java'].",
+        description: `${ENTRIES_MODULE_REMINDER} Creates or updates one canonical project fact (entry). Use when you discovered a concrete fact while working. Do not use for module structure—use set-module-details. Do not copy module.description into summary; link via refs.moduleName only. Upsert: pass id to update, or omit id to match by kind+title or create new. Example: kind=http-endpoint, title='POST /orders', summary='Creates order', refs.moduleName='orders', refs.files=['src/OrderController.java'].`,
         inputSchema: {
             projectId: z
                 .string()
@@ -54,37 +103,71 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
                 .optional()
                 .describe("Optional labels for get-slice query filtering"),
         },
-        outputSchema: { entryId: z.string(), message: z.string() },
+        outputSchema: {
+            entryId: z.string(),
+            message: z.string(),
+            reminder: z.string().optional(),
+            warning: z.string().optional(),
+            suggestedModuleNames: z.array(z.string()).optional(),
+        },
     }, async (params) => {
         const projectId = resolveProjectId(params.projectId);
         await ensureMigrated(projectId);
-        const now = new Date().toISOString();
-        let existing = null;
-        if (params.id) {
-            existing = await readEntry(projectId, params.id);
-        }
-        else {
-            existing = await findEntryByKindTitle(projectId, params.kind, params.title);
-        }
-        const entryId = params.id ?? existing?.id ?? uuidv4();
-        const entry = {
-            id: entryId,
-            kind: params.kind,
-            title: params.title,
-            summary: params.summary,
-            payload: params.payload,
-            refs: params.refs,
-            tags: params.tags,
-            createdAt: existing?.createdAt ?? now,
-            updatedAt: now,
-        };
-        await writeEntry(projectId, entry);
+        const entry = await saveSingleEntry(projectId, params);
+        const architecture = await readArchitecture(projectId);
+        const structuredContent = entryLinkStructuredContent(entry.id, entry, architecture);
+        const textParts = [`Entry saved: ${entry.title} (${entry.kind})`];
+        if (structuredContent.reminder)
+            textParts.push(structuredContent.reminder);
+        if (structuredContent.warning)
+            textParts.push(structuredContent.warning);
         return {
-            content: [{ type: "text", text: `Entry saved: ${entry.title} (${entry.kind})` }],
-            structuredContent: {
-                entryId,
-                message: `Entry '${entry.title}' saved`,
-            },
+            content: [{ type: "text", text: textParts.join("\n") }],
+            structuredContent,
+        };
+    });
+    server.registerTool("set-entries", {
+        title: "Set Entries",
+        description: `${ENTRIES_MODULE_REMINDER} Bulk upsert entries (max ${MAX_BULK_ENTRIES} per call). If no modules yet, call set-project-architecture first. Pass moduleName to set refs.moduleName on all entries. Prefer set-module-details with facts[] when documenting one module.`,
+        inputSchema: {
+            projectId: z.string().optional().describe("Project id"),
+            moduleName: z
+                .string()
+                .optional()
+                .describe("Sets refs.moduleName on every entry; must exist in list-modules"),
+            entries: z
+                .array(moduleFactSchema)
+                .describe(`Array of facts to upsert (max ${MAX_BULK_ENTRIES})`),
+        },
+        outputSchema: {
+            entriesCreated: z.number(),
+            entriesUpdated: z.number(),
+            entryIds: z.array(z.string()),
+            message: z.string(),
+            reminder: z.string().optional(),
+            warning: z.string().optional(),
+            suggestedModuleNames: z.array(z.string()).optional(),
+        },
+    }, async (params) => {
+        const projectId = resolveProjectId(params.projectId);
+        await ensureMigrated(projectId);
+        const upsert = await upsertFacts(projectId, params.entries, params.moduleName);
+        const architecture = await readArchitecture(projectId);
+        const moduleNames = architecture?.modules.map((m) => m.name) ?? [];
+        const linkHints = buildEntryLinkHints(moduleNames, params.moduleName);
+        const structuredContent = {
+            ...upsert,
+            message: `${upsert.entriesCreated} created, ${upsert.entriesUpdated} updated`,
+            ...linkHints,
+        };
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Entries saved: ${structuredContent.message}${linkHints.reminder ? `\n${linkHints.reminder}` : ""}${linkHints.warning ? `\n${linkHints.warning}` : ""}`,
+                },
+            ],
+            structuredContent,
         };
     });
     server.registerTool("get-entry", {
@@ -128,7 +211,7 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
     });
     server.registerTool("list-entries", {
         title: "List Entries",
-        description: "Returns the entry catalog (id, kind, title, tags)—no payload. Use to browse or pick ids before get-entry. For a typed horizontal view (all APIs, all domain terms) use get-slice instead. On first call, migrates legacy scripts/ folder into entries and deletes scripts/.",
+        description: "Returns the entry catalog (id, kind, title, tags)—no payload. Unlinked entries lack refs.moduleName; run validate after edits. For a typed horizontal view (all APIs, all domain terms) use get-slice instead. On first call, migrates legacy scripts/ folder into entries and deletes scripts/.",
         inputSchema: {
             projectId: z.string().optional().describe("Project id"),
             kind: z.string().optional().describe("Filter by exact kind, e.g. http-endpoint"),
@@ -200,7 +283,7 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
     });
     server.registerTool("list-slices", {
         title: "List Slices",
-        description: "Lists built-in and custom slice views (filters over entries—not separate stored data). Use before get-slice to pick sliceId (api, domain, persistence, …). Entry counts come from index only. Custom slices appear after set-slice.",
+        description: "Lists built-in and custom slice views (filters over entries—not separate stored data). Empty slice = no entries with matching kind, not a missing slice definition. Use before get-slice to pick sliceId (api, domain, persistence, …).",
         inputSchema: {
             projectId: z.string().optional().describe("Project id"),
         },
@@ -223,16 +306,23 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
             if (!def)
                 return null;
             const kinds = def.filter.kinds ?? [];
+            const tags = def.filter.tags;
+            let entryCount = index.items.length;
+            if (kinds.length || tags?.length) {
+                const entries = await loadEntries(projectId, {
+                    kinds: kinds.length ? kinds : undefined,
+                    tags,
+                });
+                entryCount = entries.length;
+            }
             return {
                 sliceId: def.id,
                 title: def.title,
                 description: def.description ?? "",
                 builtin: false,
-                entryCount: kinds.length
-                    ? countEntriesForKinds(index.items, kinds)
-                    : index.items.length,
+                entryCount,
                 kinds,
-                tags: def.filter.tags,
+                tags,
             };
         }));
         const slices = [...builtins, ...custom.filter(Boolean)];
@@ -247,7 +337,7 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
         .describe("compact=minimal list; detail=full entries; table=rows for API-like kinds (method/path columns)");
     server.registerTool("get-slice", {
         title: "Get Slice",
-        description: "Returns a horizontal project view: filtered entries transformed for agents (no duplicate storage). Use for 'all APIs', 'all domain terms', scripts, etc. Call list-slices first to pick sliceId. Do not use get-project-architecture for this. format=compact default; table for api slice. includeModuleContext joins module summary at read time only—never stored in entry.",
+        description: "Returns a horizontal project view: filtered entries transformed for agents. Empty slice = no entries with matching kind. Call list-slices first to pick sliceId. format=compact default; table for api slice. Use offset for pagination (limit max 200).",
         inputSchema: {
             projectId: z.string().optional().describe("Project id"),
             sliceId: z
@@ -259,6 +349,7 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
                 .describe("Further filter by substring in title, summary, kind, tags"),
             format: sliceFormatSchema,
             limit: z.number().optional().describe("Max items (default 50, max 200)"),
+            offset: z.number().optional().describe("Skip first N items after sort (default 0)"),
             includeModuleContext: z
                 .boolean()
                 .optional()
@@ -295,6 +386,7 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
         const slice = buildSliceResponse(params.sliceId, title, entries, {
             format,
             limit: clampLimit(params.limit),
+            offset: clampOffset(params.offset),
             query: undefined,
             includeModuleContext: params.includeModuleContext,
         }, architecture);

@@ -4,6 +4,7 @@ export declare function getBuiltinSlice(sliceId: string): BuiltinSliceInfo | und
 export declare function resolveSliceFilter(sliceId: string, customSlice: SliceDefinition | null): EntryFilter | null;
 export declare function matchesEntryFilter(entry: Entry, filter: EntryFilter): boolean;
 export declare function clampLimit(limit?: number): number;
+export declare function clampOffset(offset?: number): number;
 export declare function buildSliceResponse(sliceId: string, sliceTitle: string, entries: Entry[], options: SliceBuildOptions, architecture: ProjectArchitecture | null): SliceResponse;
 export declare function countEntriesForKinds(indexItems: {
     kind: string;

@@ -723,6 +723,7 @@ const validationIssueSchema = z.object({
 });
 
 const validationOutputSchema = {
+  projectId: z.string(),
   valid: z.boolean(),
   issueCount: z.number(),
   summary: z.string(),

@@ -741,6 +741,9 @@ const validationOutputSchema = {
       entriesUnlinked: z.number(),
       entriesOrphanModule: z.number(),
       entriesWithoutModules: z.number(),
+      entriesSliceOrphan: z.number(),
+      modulesTooManyEntries: z.number(),
+      modulesTooFewEntries: z.number(),
     })
     .optional(),
   checksRun: z.array(z.string()),
@@ -759,6 +762,22 @@ const validationInputSchema = {
     .boolean()
     .optional()
     .describe("Warn when api/domain/persistence slices have zero entries but modules exist (default true)"),
+  checkSliceCoverage: z
+    .boolean()
+    .optional()
+    .describe("Check entries match at least one built-in or custom slice (default true)"),
+  checkModuleEntryCounts: z
+    .boolean()
+    .optional()
+    .describe("Check module entry count thresholds (default true)"),
+  moduleEntryMax: z
+    .number()
+    .optional()
+    .describe("Max entries per module before module-too-many-entries (default 50)"),
+  moduleEntryMin: z
+    .number()
+    .optional()
+    .describe("Min entries per module when count > 0; omit to disable module-too-few-entries"),
 };
 
 async function runValidationTool(params: {
@@ -768,6 +787,10 @@ async function runValidationTool(params: {
   checkEntryCoverage?: boolean;
   checkStorage?: boolean;
   checkEmptySlices?: boolean;
+  checkSliceCoverage?: boolean;
+  checkModuleEntryCounts?: boolean;
+  moduleEntryMax?: number;
+  moduleEntryMin?: number;
 }) {
   const projectId = resolveProjectId(params.projectId);
   const result = await runProjectValidation(projectId, {
@@ -776,6 +799,10 @@ async function runValidationTool(params: {
     checkEntryCoverage: params.checkEntryCoverage,
     checkStorage: params.checkStorage,
     checkEmptySlices: params.checkEmptySlices,
+    checkSliceCoverage: params.checkSliceCoverage,
+    checkModuleEntryCounts: params.checkModuleEntryCounts,
+    moduleEntryMax: params.moduleEntryMax,
+    moduleEntryMin: params.moduleEntryMin,
   });
   const text = `${result.summary}\n\n${JSON.stringify(result, null, 2)}`;
   return {
@@ -789,7 +816,7 @@ server.registerTool(
   {
     title: "Validate Project",
     description:
-      "Run after set-project-architecture, set-module-details, set-entry, or set-entries. Returns a compact report (summary, stats, issues by kind)—no need to load the full project in the agent. Checks only known rules: dataFlow consistency, module↔entry links, module detail files, entry index drift, empty api/domain/persistence slices. Fix issues[] then call validate again.",
+      "Run after set-project-architecture, set-module-details, set-entry, or set-entries. Returns a compact report (summary, stats, issues by kind)—no need to load the full project in the agent. Checks only known rules: dataFlow consistency, module↔entry links, module detail files, entry index drift, empty api/domain/persistence slices, entry slice coverage, module entry count thresholds. Fix issues[] then call validate again.",
     inputSchema: validationInputSchema,
     outputSchema: validationOutputSchema,
   },

@@ -53,6 +53,23 @@ call get-module-details '{"moduleName":"index"}' 15
 call set-entry '{"kind":"http-endpoint","title":"GET /health","summary":"Bridge health check","payload":{"method":"GET","path":"/health"},"tags":["test"]}' 16
 call list-entries '{}' 17
 call search-entries '{"query":"health","limit":5}' 18
+echo "=== search-entries navigation fields ===" >&2
+curl -sS -X POST "${BASE}/mcp" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":180,"method":"tools/call","params":{"name":"search-entries","arguments":{"query":"health","limit":5}}}' \
+  | node -e "
+const chunks=[];process.stdin.on('data',d=>chunks.push(d));process.stdin.on('end',()=>{
+  const j=JSON.parse(Buffer.concat(chunks).toString());
+  const sc=j.lines?.find(l=>l.id===180)?.result?.structuredContent;
+  if(!sc?.results?.length) throw new Error('search-entries returned no results');
+  const row=sc.results[0];
+  for (const key of ['snippet','slices','moduleName','matchedIn']) {
+    if(row[key]===undefined) throw new Error('missing search field: '+key);
+  }
+  if(typeof sc.hasMore!=='boolean') throw new Error('missing hasMore');
+  console.log(JSON.stringify({ ok: true, summary: sc.summary, sample: row.title, slices: row.slices }, null, 2));
+});"
+echo >&2
 call list-slices '{}' 19
 call get-slice '{"sliceId":"api","format":"compact","limit":10}' 20
 call set-slice '{"id":"test-game","title":"Game assets","kinds":["godot-scene"],"tags":["test"]}' 21

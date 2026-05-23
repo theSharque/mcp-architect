@@ -5,6 +5,10 @@ export interface ProjectValidationOptions {
     checkEntryCoverage?: boolean;
     checkStorage?: boolean;
     checkEmptySlices?: boolean;
+    checkSliceCoverage?: boolean;
+    checkModuleEntryCounts?: boolean;
+    moduleEntryMax?: number;
+    moduleEntryMin?: number;
 }
 export declare function runProjectValidation(projectId: string, options?: ProjectValidationOptions): Promise<ProjectValidationResult>;
 //# sourceMappingURL=project-validate.d.ts.map

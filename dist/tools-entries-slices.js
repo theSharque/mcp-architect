@@ -5,6 +5,8 @@ import { deleteEntry, deleteSlice, filterIndexItems, findEntryByKindTitle, loadE
 import { migrateScriptsToEntries } from "./migrate-scripts.js";
 import { ENTRIES_MODULE_REMINDER, buildEntryLinkHints } from "./agent-hints.js";
 import { MAX_BULK_ENTRIES, upsertFacts } from "./entry-sync.js";
+import { searchEntries } from "./entry-search.js";
+import { loadCustomSlices } from "./slice-coverage.js";
 const entryRefsSchema = z
     .object({
     moduleName: z
@@ -246,39 +248,77 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
     });
     server.registerTool("search-entries", {
         title: "Search Entries",
-        description: "Search all entries by text in title, summary, kind, and tags; returns compact rows with summary. Use when you know a name (Order, Auth) but not the slice. Prefer get-slice when you know the category (api, domain). Does not search module files on disk.",
+        description: "Compact navigation search over entries by title, summary, kind, and tags. Returns snippet, matchedIn, slices, and moduleName per hit—use get-entry for full payload. Prefer get-slice when you know the category (api, domain). Filters (moduleName, kind, tags) narrow agent context. Default limit 10.",
         inputSchema: {
             projectId: z.string().optional().describe("Project id"),
             query: z.string().describe("Search text"),
+            moduleName: z
+                .string()
+                .optional()
+                .describe("Exact filter on refs.moduleName"),
+            kind: z.string().optional().describe("Exact filter on entry kind"),
+            tags: z
+                .array(z.string())
+                .optional()
+                .describe("Filter entries having any of these tags"),
             limit: z
                 .number()
                 .optional()
-                .describe("Max results (default 50, max 200)"),
+                .describe("Max results per page (default 10, max 50)"),
+            offset: z
+                .number()
+                .optional()
+                .describe("Skip first N matches (default 0)"),
         },
-        outputSchema: { results: z.array(z.any()), total: z.number() },
-    }, async ({ projectId: provided, query, limit }) => {
+        outputSchema: {
+            summary: z.string(),
+            total: z.number(),
+            returned: z.number(),
+            offset: z.number(),
+            hasMore: z.boolean(),
+            results: z.array(z.object({
+                id: z.string(),
+                kind: z.string(),
+                title: z.string(),
+                summary: z.string(),
+                tags: z.array(z.string()).optional(),
+                refs: z
+                    .object({
+                    moduleName: z.string().optional(),
+                    files: z.array(z.string()).optional(),
+                    entryIds: z.array(z.string()).optional(),
+                })
+                    .optional(),
+                snippet: z.string(),
+                matchedIn: z.array(z.enum(["title", "summary", "kind", "tags"])),
+                slices: z.array(z.string()),
+                moduleName: z.string(),
+            })),
+        },
+    }, async ({ projectId: provided, query, moduleName, kind, tags, limit, offset }) => {
         const projectId = resolveProjectId(provided);
         await ensureMigrated(projectId);
-        const q = query.trim().toLowerCase();
-        const entries = (await loadEntries(projectId)).filter((e) => [e.title, e.summary, e.kind, ...(e.tags ?? [])].join(" ").toLowerCase().includes(q));
-        const max = clampLimit(limit);
-        const slice = entries.slice(0, max);
-        const results = slice.map((e) => ({
-            id: e.id,
-            kind: e.kind,
-            title: e.title,
-            summary: e.summary,
-            tags: e.tags,
-            refs: e.refs,
-        }));
+        const entries = await loadEntries(projectId, {
+            kinds: kind ? [kind] : undefined,
+            tags,
+        });
+        const customSlices = await loadCustomSlices(projectId);
+        const response = searchEntries(entries, customSlices, {
+            query,
+            moduleName,
+            kind,
+            tags,
+            limit,
+            offset,
+        });
         return {
             content: [
                 {
                     type: "text",
-                    text: JSON.stringify({ total: entries.length, returned: results.length, results }, null, 2),
+                    text: `${response.summary}\n\n${JSON.stringify(response, null, 2)}`,
                 },
             ],
-            structuredContent: { results, total: entries.length },
+            structuredContent: { ...response },
         };
     });
     server.registerTool("list-slices", {

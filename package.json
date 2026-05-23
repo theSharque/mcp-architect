@@ -1,6 +1,6 @@
 {
   "name": "mcp-architector",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "MCP server for architecture and system design",
   "type": "module",
   "main": "dist/index.js",
@@ -11,14 +11,14 @@
     "dev": "tsx watch src/index.ts",
     "inspector": "npx @modelcontextprotocol/inspector node dist/index.js",
     "prepublishOnly": "npm run build",
-    "test:unit": "npm run build && node --test dist/data-flow.test.js dist/entry-coverage.test.js dist/project-validate.test.js"
+    "test:unit": "npm run build && node --test dist/data-flow.test.js dist/entry-coverage.test.js dist/project-validate.test.js dist/slice-coverage.test.js dist/entry-search.test.js"
   },
   "keywords": ["mcp", "model-context-protocol", "architecture", "system-design"],
   "author": "theSharque",
   "license": "MIT",
   "overrides": {
     "ajv": "8.18.0",
-    "qs": "6.14.2",
+    "qs": "6.15.2",
     "express-rate-limit": "8.5.2",
     "hono": "4.12.21",
     "ip-address": "10.2.0"

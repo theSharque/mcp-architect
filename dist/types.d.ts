@@ -150,6 +150,9 @@ export interface EntryCoverageSummary {
     entriesUnlinked: number;
     entriesOrphanModule: number;
     entriesWithoutModules: number;
+    entriesSliceOrphan: number;
+    modulesTooManyEntries: number;
+    modulesTooFewEntries: number;
 }
 export interface ValidationIssue {
     kind: string;
@@ -177,5 +180,30 @@ export interface RebuildResult {
     edgesAdded: number;
     edgesRemoved: number;
     modulesUpdated: number;
+}
+export type SearchMatchField = 'title' | 'summary' | 'kind' | 'tags';
+export interface SearchEntryResult {
+    id: string;
+    kind: string;
+    title: string;
+    summary: string;
+    tags?: string[];
+    refs?: EntryRefs;
+    snippet: string;
+    matchedIn: SearchMatchField[];
+    slices: string[];
+    moduleName: string;
+}
+export interface SearchEntriesResponse {
+    summary: string;
+    total: number;
+    returned: number;
+    offset: number;
+    hasMore: boolean;
+    results: SearchEntryResult[];
+}
+export interface SliceFilterRef {
+    sliceId: string;
+    filter: EntryFilter;
 }
 //# sourceMappingURL=types.d.ts.map

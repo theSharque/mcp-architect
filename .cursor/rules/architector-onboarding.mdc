@@ -1,0 +1,56 @@
+---
+description: Onboard or sync a codebase into MCP Architector (phased, context-safe). Use when importing a new repo, documenting architecture, or refreshing architector data.
+alwaysApply: false
+---
+
+# MCP Architector — onboarding
+
+Do **not** import the whole repo in one step. Architector stores data in `~/.mcp-architector/{projectId}/`; the repo is analyzed by you (Read/Grep), not by the MCP server.
+
+## Before writing
+
+1. `list-projects` — confirm `projectId` matches this workspace (`MCP_PROJECT_ID`).
+2. `get-project-architecture` — see what is already documented; resume instead of restarting blindly.
+
+## Phases (one phase per user-visible step unless asked to continue)
+
+### Phase 0 — Plan (no bulk writes)
+
+- Infer vertical modules from top-level packages/dirs and dependency edges.
+- Propose module list + order; **wait for confirmation** before Phase 1 on large repos.
+
+### Phase 1 — Structure only
+
+- `set-project-architecture` with `replaceModules: true` only for greenfield; otherwise merge.
+- Modules: name, description, dependencies — **no** long text, **no** facts yet.
+- `rebuild-data-flow` if many modules.
+- `validate` — fix structure issues; report summary to user.
+
+### Phase 2 — One module at a time
+
+For each module:
+
+- `set-module-details` with `files[]` + `facts[]` (http-endpoint, entity, glossary, script, …).
+- Max **200** facts per call (`set-entries` / `facts[]`); batch if needed.
+- Link every fact: `refs.moduleName` = module name. Do not paste module description into entry summaries.
+- `validate` after each module (compact report only — do not reload full project).
+
+### Phase 3 — Done check
+
+- `validate` — target: no `entry-unlinked`, no empty `api`/`domain`/`persistence` if those areas exist in code.
+- `list-slices` → spot-check `get-slice` with `format=compact`, `limit=10`.
+
+## Context rules
+
+- Prefer `validate`, `search-entries`, `get-slice` (paginated) over loading all entries.
+- Use `search-entries` → `get-entry` for a single fact; not `get-entry` for every file in repo.
+- Never edit `~/.mcp-architector` directly.
+- After code changes to architector itself, update architecture via MCP architector tools.
+
+## User prompts that trigger this rule
+
+- "Import this project into architector"
+- "Document architecture in architector"
+- "Onboard repo to MCP architector"
+
+Replace one-shot requests with: structure first → confirm → module-by-module → validate.

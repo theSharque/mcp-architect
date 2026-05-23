@@ -10,15 +10,54 @@ function fileMatches(file, pattern) {
     const base = file.split('/').pop() ?? file;
     return pattern.test(base) || pattern.test(file);
 }
-export function validateEntryCoverage(architecture, entries, moduleDetailsMap) {
-    const issues = [];
-    const moduleNames = new Set(architecture?.modules.map((m) => m.name) ?? []);
-    const coverage = {
+function emptyEntryCoverage() {
+    return {
         modulesWithoutEntries: 0,
         entriesUnlinked: 0,
         entriesOrphanModule: 0,
         entriesWithoutModules: 0,
+        entriesSliceOrphan: 0,
+        modulesTooManyEntries: 0,
+        modulesTooFewEntries: 0,
     };
+}
+export function validateModuleEntryCounts(architecture, entries, options = {}) {
+    const issues = [];
+    let modulesTooManyEntries = 0;
+    let modulesTooFewEntries = 0;
+    const moduleEntryMax = options.moduleEntryMax ?? 50;
+    const moduleEntryMin = options.moduleEntryMin;
+    if (!architecture) {
+        return { issues, modulesTooManyEntries, modulesTooFewEntries };
+    }
+    for (const mod of architecture.modules) {
+        const count = entriesForModule(entries, mod.name).length;
+        if (count > moduleEntryMax) {
+            modulesTooManyEntries += 1;
+            issues.push({
+                kind: 'module-too-many-entries',
+                module: mod.name,
+                detail: `Module '${mod.name}' has ${count} entries (max ${moduleEntryMax})—consider splitting the module`,
+            });
+        }
+        if (moduleEntryMin !== undefined &&
+            moduleEntryMin > 1 &&
+            count > 0 &&
+            count < moduleEntryMin) {
+            modulesTooFewEntries += 1;
+            issues.push({
+                kind: 'module-too-few-entries',
+                module: mod.name,
+                detail: `Module '${mod.name}' has ${count} entries (min ${moduleEntryMin})—consider adding facts or merging modules`,
+            });
+        }
+    }
+    return { issues, modulesTooManyEntries, modulesTooFewEntries };
+}
+export function validateEntryCoverage(architecture, entries, moduleDetailsMap) {
+    const issues = [];
+    const moduleNames = new Set(architecture?.modules.map((m) => m.name) ?? []);
+    const coverage = emptyEntryCoverage();
     if (entries.length > 0 && (!architecture || architecture.modules.length === 0)) {
         coverage.entriesWithoutModules = entries.length;
         issues.push({

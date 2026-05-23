@@ -35,6 +35,25 @@
 
 Для **Cursor IDE**: Settings → Features → Model Context Protocol → Edit Config, затем добавьте тот же блок в `mcpServers`. Подробнее в разделе [Интеграция](#интеграция).
 
+## Cursor rule (рекомендуется)
+
+Для **Cursor IDE** и **Cursor Cloud Agents** используйте пошаговое правило onboarding — чтобы агент не пытался перенести весь репозиторий в architector одним ответом.
+
+1. Скопируйте [`.cursor/rules/architector-onboarding.mdc`](.cursor/rules/architector-onboarding.mdc) в **ваш проект** (репозиторий, который документируете):
+
+   ```bash
+   mkdir -p /path/to/your-app/.cursor/rules
+   cp /path/to/mcp-architector/.cursor/rules/architector-onboarding.mdc /path/to/your-app/.cursor/rules/
+   ```
+
+2. Убедитесь, что MCP Architector настроен с `MCP_PROJECT_ID`, указывающим на этот workspace (см. [Как подключить](#как-подключить-к-claude-desktop--ide)).
+
+3. В чате, например: *«Onboard this repo into architector — phase 0 plan first»* или *«Импортируй архитектуру в architector по модулям»*.
+
+Правило с **`alwaysApply: false`** — Cursor подключает его, когда задача про import/onboarding архитектуры. Оно задаёт порядок: структура → один модуль за шаг → `validate` после каждого шага → только компактные tools.
+
+Если вы разрабатываете **этот** репозиторий сервера, файл уже лежит здесь — contributors и Cloud Agents используют тот же workflow при обновлении `~/.mcp-architector/_qs_mcp-architector/`.
+
 ## Обзор
 
 Хранение и управление архитектурой проекта, модулями, скриптами, потоками данных и примерами использования — всё локально с полной приватностью.
@@ -94,6 +113,7 @@
 | Проверка после правок | `validate` |
 | Рассинхрон index | `rebuild-entry-index` |
 | Проект с нуля | `set-project-architecture` с `replaceModules: true` |
+| Onboarding свежего git clone (по фазам) | Скопировать [`.cursor/rules/architector-onboarding.mdc`](.cursor/rules/architector-onboarding.mdc) → попросить агента onboard по шагам |
 
 **Полная картина проекта:** одних модулей недостаточно для slices — без entries с `http-endpoint` срез `api` пуст. Новый модуль → `facts` или entries в том же шаге.
 

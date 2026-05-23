@@ -35,6 +35,25 @@ Add the server to your MCP config. Example for **claude_desktop_config.json**:
 
 For **Cursor IDE**: Settings → Features → Model Context Protocol → Edit Config, then add the same block inside `mcpServers`. See the [Integration](#integration) section for more options.
 
+## Cursor rule (recommended)
+
+For **Cursor IDE** and **Cursor Cloud Agents**, use a phased onboarding rule so the agent does not dump the whole repo into context in one shot.
+
+1. Copy [`.cursor/rules/architector-onboarding.mdc`](.cursor/rules/architector-onboarding.mdc) into **your project** (the repo you are documenting):
+
+   ```bash
+   mkdir -p /path/to/your-app/.cursor/rules
+   cp /path/to/mcp-architector/.cursor/rules/architector-onboarding.mdc /path/to/your-app/.cursor/rules/
+   ```
+
+2. Ensure MCP Architector is configured with `MCP_PROJECT_ID` pointing at that workspace (see [How to connect](#how-to-connect-to-claude-desktop--ide)).
+
+3. Ask in chat, for example: *"Onboard this repo into architector — phase 0 plan first"* or *"Import architecture module by module"*.
+
+The rule is **`alwaysApply: false`** — Cursor attaches it when the task matches architecture import/onboarding. It enforces: structure → one module per step → `validate` after each step → compact tools only.
+
+If you develop **this** server repo, keep the same file here so contributors and Cloud Agents follow the same workflow when updating `~/.mcp-architector/_qs_mcp-architector/`.
+
 ## Overview
 
 Store and manage project architecture, modules, scripts, data flow, and usage examples - all locally with complete privacy.
@@ -94,6 +113,7 @@ Store and manage project architecture, modules, scripts, data flow, and usage ex
 | Diagnose graph + empty slices | `validate` (or `validate-architecture`) |
 | Index out of sync | `rebuild-entry-index` |
 | Create project from scratch | `set-project-architecture` with `replaceModules: true` |
+| Onboard a fresh git clone (phased) | Copy [`.cursor/rules/architector-onboarding.mdc`](.cursor/rules/architector-onboarding.mdc) → ask agent to onboard phase by phase |
 
 **Full project picture:** modules alone do not populate slices — without `http-endpoint` (and other kinds) entries, slice `api` stays empty. New module → add `facts` or entries in the same step.
 
@@ -309,7 +329,7 @@ Lists all projects in local storage (`~/.mcp-architector`). Use when the workspa
 | `get-entry` | Full entry by `id` |
 | `delete-entry` | Remove entry |
 | `list-entries` | Catalog without payload; filter by `kind`, `tags`, `query` |
-| `search-entries` | Text search in title, summary, kind, tags |
+| `search-entries` | Compact text search with `snippet`, `slices`, `moduleName`, pagination; filters: `moduleName`, `kind`, `tags` |
 | `list-slices` | Built-in + custom slices with entry counts |
 | `get-slice` | Filtered view: `sliceId`, `format`, `query`, `limit`, `offset`, `hasMore` |
 | `set-slice` | Save custom filter (`kinds`, `tags`) — no items |
@@ -317,6 +337,14 @@ Lists all projects in local storage (`~/.mcp-architector`). Use when the workspa
 | `rebuild-entry-index` | Rebuild `entries/index.json` from entry files |
 
 **Built-in `sliceId` values:** `api`, `persistence`, `events`, `domain`, `flows`, `integrations`, `config`, `runtime`, `decisions`, `scripts`.
+
+### search-entries
+
+Compact navigation search—returns enough context to pick a hit, then call `get-entry` for full payload.
+
+**Input:** `query` (required), `moduleName`, `kind`, `tags`, `limit` (default 10, max 50), `offset` (default 0)
+
+**Output:** `summary`, `total`, `returned`, `offset`, `hasMore`, `results[]` with `snippet`, `matchedIn`, `slices`, `moduleName` plus legacy `summary`, `tags`, `refs`
 
 **Recommended `kind` examples (any string allowed):**
 
@@ -386,11 +414,11 @@ Rebuilds `dataFlow` for all modules from module file `dependencies` or existing 
 **Checks (only rules we can verify from stored JSON):**
 - dataFlow: inverse drift, dangling `dependsOn`/`providesTo`, orphan flow keys
 - `module.dependencies` vs `dataFlow.dependsOn`
-- entries: `entries-without-modules`, `entry-unlinked`, `orphan-entry-module`, `module-no-entries`, `module-missing-api` / `module-missing-persistence`
+- entries: `entries-without-modules`, `entry-unlinked`, `orphan-entry-module`, `module-no-entries`, `module-missing-api` / `module-missing-persistence`, `entry-slice-orphan`, `module-too-many-entries`, `module-too-few-entries`
 - storage: missing `modules/{id}.json`, orphan module files, entry index drift
 - slices: empty built-in `api` / `domain` / `persistence` when modules exist
 
-**Input:** `projectId`, `checkInverse`, `checkModuleDeps`, `checkEntryCoverage`, `checkStorage`, `checkEmptySlices` (all default `true`)
+**Input:** `projectId`, `checkInverse`, `checkModuleDeps`, `checkEntryCoverage`, `checkStorage`, `checkEmptySlices`, `checkSliceCoverage`, `checkModuleEntryCounts`, `moduleEntryMax` (default `50`), `moduleEntryMin` (optional; omit to disable min check) — all boolean flags default `true` unless noted
 
 **Output:** `valid`, `issueCount`, `summary`, `stats`, `issuesByKind`, `issues[]`, `coverage`, `checksRun`
 

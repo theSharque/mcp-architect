@@ -1,9 +1,24 @@
 import { promises as fs } from 'node:fs';
 import { validateDataFlow } from './data-flow.js';
-import { validateEntryCoverage } from './entry-coverage.js';
+import { validateEntryCoverage, validateModuleEntryCounts } from './entry-coverage.js';
+import { loadCustomSlices, validateSliceCoverage } from './slice-coverage.js';
 import { BUILTIN_SLICES, countEntriesForKinds } from './slices.js';
 import { getEntriesDir, listModules, loadEntries, readArchitecture, readEntry, readEntryIndex, readModule, } from './storage.js';
 const SLICE_EMPTY_CHECK_IDS = ['api', 'domain', 'persistence'];
+function emptyCoverage() {
+    return {
+        modulesWithoutEntries: 0,
+        entriesUnlinked: 0,
+        entriesOrphanModule: 0,
+        entriesWithoutModules: 0,
+        entriesSliceOrphan: 0,
+        modulesTooManyEntries: 0,
+        modulesTooFewEntries: 0,
+    };
+}
+function mergeCoverage(base, patch) {
+    return { ...base, ...patch };
+}
 async function countEntryFilesOnDisk(projectId) {
     try {
         const files = await fs.readdir(getEntriesDir(projectId));
@@ -117,6 +132,8 @@ export async function runProjectValidation(projectId, options = {}) {
     const checkEntryCoverage = options.checkEntryCoverage ?? true;
     const checkStorage = options.checkStorage ?? true;
     const checkEmptySlices = options.checkEmptySlices ?? true;
+    const checkSliceCoverage = options.checkSliceCoverage ?? true;
+    const checkModuleEntryCounts = options.checkModuleEntryCounts ?? true;
     const checksRun = [];
     const architecture = await readArchitecture(projectId);
     const moduleDetailsMap = architecture
@@ -154,10 +171,31 @@ export async function runProjectValidation(projectId, options = {}) {
             issues.push(...entryResult.issues);
             coverage = entryResult.coverage;
         }
+        if (checkModuleEntryCounts) {
+            checksRun.push('module-entry-counts');
+            const countResult = validateModuleEntryCounts(architecture, entries, {
+                moduleEntryMax: options.moduleEntryMax,
+                moduleEntryMin: options.moduleEntryMin,
+            });
+            issues.push(...countResult.issues);
+            coverage = mergeCoverage(coverage ?? emptyCoverage(), {
+                modulesTooManyEntries: countResult.modulesTooManyEntries,
+                modulesTooFewEntries: countResult.modulesTooFewEntries,
+            });
+        }
         if (checkStorage) {
             checksRun.push('module-files');
             issues.push(...validateModuleFiles(architecture, moduleDetailsMap, moduleFileIds));
         }
+    }
+    if (checkSliceCoverage && entries.length > 0) {
+        checksRun.push('slice-coverage');
+        const customSlices = await loadCustomSlices(projectId);
+        const sliceResult = validateSliceCoverage(entries, customSlices);
+        issues.push(...sliceResult.issues);
+        coverage = mergeCoverage(coverage ?? emptyCoverage(), {
+            entriesSliceOrphan: sliceResult.entriesSliceOrphan,
+        });
     }
     if (checkStorage) {
         checksRun.push('entry-index');

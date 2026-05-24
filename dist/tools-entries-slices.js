@@ -4,9 +4,15 @@ import { BUILTIN_SLICES, buildSliceResponse, clampLimit, clampOffset, countEntri
 import { deleteEntry, deleteSlice, filterIndexItems, findEntryByKindTitle, loadEntries, readArchitecture, readEntry, readEntryIndex, readSlice, writeEntry, writeSlice, listSliceIds, } from "./storage.js";
 import { migrateScriptsToEntries } from "./migrate-scripts.js";
 import { ENTRIES_MODULE_REMINDER, buildEntryLinkHints } from "./agent-hints.js";
-import { MAX_BULK_ENTRIES, upsertFacts } from "./entry-sync.js";
+import { BULK_ENTRIES_WARN_THRESHOLD, MAX_BULK_ENTRIES, computeImportStats, deleteEntriesByFilter, replaceEntries, upsertFacts, validateImportEntries, } from "./entry-sync.js";
 import { searchEntries } from "./entry-search.js";
 import { loadCustomSlices } from "./slice-coverage.js";
+const replaceScopeSchema = z.object({
+    kind: z.string().optional().describe("Exact entry kind in scope"),
+    kinds: z.array(z.string()).optional().describe("Entry kinds in scope"),
+    moduleName: z.string().optional().describe("Only entries linked to this module"),
+    tags: z.array(z.string()).optional().describe("Entries having any of these tags"),
+});
 const entryRefsSchema = z
     .object({
     moduleName: z
@@ -25,8 +31,18 @@ const entryRefsSchema = z
     .optional();
 const moduleFactRefsSchema = z
     .object({
-    files: z.array(z.string()).optional(),
-    entryIds: z.array(z.string()).optional(),
+    moduleName: z
+        .string()
+        .optional()
+        .describe("Module name from list-modules; per-entry override of batch moduleName"),
+    files: z
+        .array(z.string())
+        .optional()
+        .describe("Workspace-relative file paths where this fact lives"),
+    entryIds: z
+        .array(z.string())
+        .optional()
+        .describe("Related entry ids, e.g. flow steps pointing to other entries"),
 })
     .optional();
 export const moduleFactSchema = z.object({
@@ -130,13 +146,13 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
     });
     server.registerTool("set-entries", {
         title: "Set Entries",
-        description: `${ENTRIES_MODULE_REMINDER} Bulk upsert entries (max ${MAX_BULK_ENTRIES} per call). If no modules yet, call set-project-architecture first. Pass moduleName to set refs.moduleName on all entries. Prefer set-module-details with facts[] when documenting one module.`,
+        description: `${ENTRIES_MODULE_REMINDER} Bulk upsert entries (max ${MAX_BULK_ENTRIES} per call; warn above ${BULK_ENTRIES_WARN_THRESHOLD}). Set refs.moduleName per entry, or pass top-level moduleName as default for entries without refs.moduleName. Prefer replace-entries for full idempotent sync of a module/kind slice.`,
         inputSchema: {
             projectId: z.string().optional().describe("Project id"),
             moduleName: z
                 .string()
                 .optional()
-                .describe("Sets refs.moduleName on every entry; must exist in list-modules"),
+                .describe("Default refs.moduleName for entries that omit refs.moduleName"),
             entries: z
                 .array(moduleFactSchema)
                 .describe(`Array of facts to upsert (max ${MAX_BULK_ENTRIES})`),
@@ -146,8 +162,8 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
             entriesUpdated: z.number(),
             entryIds: z.array(z.string()),
             message: z.string(),
-            reminder: z.string().optional(),
             warning: z.string().optional(),
+            reminder: z.string().optional(),
             suggestedModuleNames: z.array(z.string()).optional(),
         },
     }, async (params) => {
@@ -162,14 +178,219 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
             message: `${upsert.entriesCreated} created, ${upsert.entriesUpdated} updated`,
             ...linkHints,
         };
+        const textParts = [`Entries saved: ${structuredContent.message}`];
+        if (upsert.warning) {
+            textParts.push(upsert.warning);
+        }
+        if (linkHints.reminder) {
+            textParts.push(linkHints.reminder);
+        }
+        if (linkHints.warning) {
+            textParts.push(linkHints.warning);
+        }
         return {
             content: [
                 {
                     type: "text",
-                    text: `Entries saved: ${structuredContent.message}${linkHints.reminder ? `\n${linkHints.reminder}` : ""}${linkHints.warning ? `\n${linkHints.warning}` : ""}`,
+                    text: textParts.join("\n"),
                 },
             ],
             structuredContent,
+        };
+    });
+    server.registerTool("delete-entries", {
+        title: "Delete Entries",
+        description: "Bulk delete entries matching kind/moduleName/tags filter. Requires confirm=true. Use before full re-import or to clear a module slice. Prefer replace-entries with deleteOrphans for idempotent sync.",
+        inputSchema: {
+            projectId: z.string().optional().describe("Project id"),
+            kind: z.string().optional().describe("Exact entry kind"),
+            kinds: z.array(z.string()).optional().describe("Entry kinds"),
+            moduleName: z.string().optional().describe("Only entries linked to this module"),
+            tags: z.array(z.string()).optional().describe("Entries having any of these tags"),
+            confirm: z
+                .boolean()
+                .describe("Must be true to delete; safety guard against accidental bulk delete"),
+        },
+        outputSchema: {
+            deleted: z.number(),
+            message: z.string(),
+        },
+    }, async (params) => {
+        if (!params.confirm) {
+            return {
+                content: [{ type: "text", text: "Bulk delete requires confirm: true" }],
+                structuredContent: { deleted: 0, message: "Bulk delete requires confirm: true" },
+            };
+        }
+        const projectId = resolveProjectId(params.projectId);
+        await ensureMigrated(projectId);
+        const result = await deleteEntriesByFilter(projectId, {
+            kind: params.kind,
+            kinds: params.kinds,
+            moduleName: params.moduleName,
+            tags: params.tags,
+        });
+        return {
+            content: [{ type: "text", text: `Deleted ${result.deleted} entries` }],
+            structuredContent: {
+                deleted: result.deleted,
+                message: `Deleted ${result.deleted} entries`,
+            },
+        };
+    });
+    server.registerTool("replace-entries", {
+        title: "Replace Entries",
+        description: "Idempotent sync: upsert entries in scope and optionally delete orphans not in the batch. Main tool for full API/UI catalog import—one call per module or kind. Match existing entries by upsertBy (default kind+title). Each entry may set refs.moduleName individually.",
+        inputSchema: {
+            projectId: z.string().optional().describe("Project id"),
+            scope: replaceScopeSchema.describe("Which existing entries participate in orphan deletion"),
+            moduleName: z
+                .string()
+                .optional()
+                .describe("Default refs.moduleName for entries without refs.moduleName"),
+            upsertBy: z
+                .array(z.enum(["kind", "title", "id"]))
+                .optional()
+                .describe("Fields used to match existing entries (default kind+title)"),
+            entries: z
+                .array(moduleFactSchema)
+                .describe(`Full desired set for this scope (max ${MAX_BULK_ENTRIES})`),
+            deleteOrphans: z
+                .boolean()
+                .optional()
+                .describe("Delete scope entries missing from batch (default true)"),
+        },
+        outputSchema: {
+            created: z.number(),
+            updated: z.number(),
+            deleted: z.number(),
+            entryIds: z.array(z.string()),
+            message: z.string(),
+        },
+    }, async (params) => {
+        const projectId = resolveProjectId(params.projectId);
+        await ensureMigrated(projectId);
+        const result = await replaceEntries(projectId, params.scope, params.entries, {
+            upsertBy: params.upsertBy,
+            deleteOrphans: params.deleteOrphans,
+            batchModuleName: params.moduleName,
+        });
+        const message = `${result.created} created, ${result.updated} updated, ${result.deleted} deleted`;
+        return {
+            content: [{ type: "text", text: `Replace complete: ${message}` }],
+            structuredContent: { ...result, message },
+        };
+    });
+    server.registerTool("import-entries", {
+        title: "Import Entries",
+        description: "Alias for replace-entries with explicit import semantics. mode=replace performs full slice replacement (same as replace-entries). Pass filter as scope; entries is the complete desired set for that slice.",
+        inputSchema: {
+            projectId: z.string().optional().describe("Project id"),
+            mode: z
+                .enum(["replace"])
+                .describe("Only replace mode is supported (full slice sync)"),
+            filter: replaceScopeSchema.describe("Scope filter (kind, moduleName, tags)"),
+            moduleName: z
+                .string()
+                .optional()
+                .describe("Default refs.moduleName for entries without refs.moduleName"),
+            upsertBy: z
+                .array(z.enum(["kind", "title", "id"]))
+                .optional()
+                .describe("Match keys (default kind+title)"),
+            entries: z
+                .array(moduleFactSchema)
+                .describe(`Complete import batch (max ${MAX_BULK_ENTRIES})`),
+            deleteOrphans: z
+                .boolean()
+                .optional()
+                .describe("Delete scope entries missing from batch (default true)"),
+        },
+        outputSchema: {
+            created: z.number(),
+            updated: z.number(),
+            deleted: z.number(),
+            entryIds: z.array(z.string()),
+            message: z.string(),
+        },
+    }, async (params) => {
+        const projectId = resolveProjectId(params.projectId);
+        await ensureMigrated(projectId);
+        const result = await replaceEntries(projectId, params.filter, params.entries, {
+            upsertBy: params.upsertBy,
+            deleteOrphans: params.deleteOrphans,
+            batchModuleName: params.moduleName,
+        });
+        const message = `${result.created} created, ${result.updated} updated, ${result.deleted} deleted`;
+        return {
+            content: [{ type: "text", text: `Import complete: ${message}` }],
+            structuredContent: { ...result, message },
+        };
+    });
+    server.registerTool("validate-import", {
+        title: "Validate Import",
+        description: "Dry-run validation for a proposed import batch. Checks duplicate upsert keys and unknown moduleName refs without writing.",
+        inputSchema: {
+            projectId: z.string().optional().describe("Project id"),
+            entries: z.array(moduleFactSchema).describe("Proposed entries to validate"),
+            upsertBy: z
+                .array(z.enum(["kind", "title", "id"]))
+                .optional()
+                .describe("Match keys (default kind+title)"),
+            checkDuplicates: z.boolean().optional().describe("Detect duplicate keys in batch (default true)"),
+            checkModuleExists: z
+                .boolean()
+                .optional()
+                .describe("Warn on unknown refs.moduleName (default true)"),
+        },
+        outputSchema: {
+            valid: z.boolean(),
+            warningCount: z.number(),
+            warnings: z.array(z.object({
+                code: z.string(),
+                detail: z.string(),
+                entryIndex: z.number().optional(),
+            })),
+        },
+    }, async (params) => {
+        const projectId = resolveProjectId(params.projectId);
+        const result = await validateImportEntries(projectId, params.entries, {
+            upsertBy: params.upsertBy,
+            checkDuplicates: params.checkDuplicates,
+            checkModuleExists: params.checkModuleExists,
+        });
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.valid
+                        ? "Import validation passed"
+                        : `Import validation: ${result.warningCount} warning(s)\n${result.warnings.map((w) => w.detail).join("\n")}`,
+                },
+            ],
+            structuredContent: { ...result },
+        };
+    });
+    server.registerTool("get-import-stats", {
+        title: "Get Import Stats",
+        description: "Returns entry counts grouped by kind, module, and tag. Use after replace-entries/import to verify catalog size.",
+        inputSchema: {
+            projectId: z.string().optional().describe("Project id"),
+        },
+        outputSchema: {
+            byKind: z.record(z.string(), z.number()),
+            byModule: z.record(z.string(), z.number()),
+            byTag: z.record(z.string(), z.number()),
+            total: z.number(),
+        },
+    }, async ({ projectId: provided }) => {
+        const projectId = resolveProjectId(provided);
+        await ensureMigrated(projectId);
+        const entries = await loadEntries(projectId);
+        const stats = computeImportStats(entries);
+        return {
+            content: [{ type: "text", text: JSON.stringify(stats, null, 2) }],
+            structuredContent: { ...stats },
         };
     });
     server.registerTool("get-entry", {
@@ -213,10 +434,11 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
     });
     server.registerTool("list-entries", {
         title: "List Entries",
-        description: "Returns the entry catalog (id, kind, title, tags)—no payload. Unlinked entries lack refs.moduleName; run validate after edits. For a typed horizontal view (all APIs, all domain terms) use get-slice instead. On first call, migrates legacy scripts/ folder into entries and deletes scripts/.",
+        description: "Returns the entry catalog (id, kind, title, tags, moduleName)—no payload. Supports kind/moduleName/tags filters and pagination (limit max 200). Unlinked entries lack moduleName; run validate after edits. For typed horizontal views use get-slice.",
         inputSchema: {
             projectId: z.string().optional().describe("Project id"),
             kind: z.string().optional().describe("Filter by exact kind, e.g. http-endpoint"),
+            moduleName: z.string().optional().describe("Filter by refs.moduleName"),
             tags: z
                 .array(z.string())
                 .optional()
@@ -225,25 +447,44 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
                 .string()
                 .optional()
                 .describe("Case-insensitive substring in title, kind, or tags"),
+            limit: z.number().optional().describe("Max items (default 50, max 200)"),
+            offset: z.number().optional().describe("Skip first N matches (default 0)"),
         },
-        outputSchema: { entries: z.array(z.any()), total: z.number() },
-    }, async ({ projectId: provided, kind, tags, query }) => {
+        outputSchema: {
+            entries: z.array(z.any()),
+            total: z.number(),
+            returned: z.number(),
+            offset: z.number(),
+            hasMore: z.boolean(),
+        },
+    }, async ({ projectId: provided, kind, moduleName, tags, query, limit, offset }) => {
         const projectId = resolveProjectId(provided);
         await ensureMigrated(projectId);
         const index = await readEntryIndex(projectId);
         const filtered = filterIndexItems(index.items, {
-            kinds: kind ? [kind] : undefined,
+            kind,
+            moduleName,
             tags,
             query,
         });
+        const pageLimit = clampLimit(limit);
+        const pageOffset = clampOffset(offset);
+        const page = filtered.slice(pageOffset, pageOffset + pageLimit);
+        const structuredContent = {
+            entries: page,
+            total: filtered.length,
+            returned: page.length,
+            offset: pageOffset,
+            hasMore: pageOffset + page.length < filtered.length,
+        };
         return {
             content: [
                 {
                     type: "text",
-                    text: JSON.stringify({ total: filtered.length, entries: filtered }, null, 2),
+                    text: JSON.stringify(structuredContent, null, 2),
                 },
             ],
-            structuredContent: { entries: filtered, total: filtered.length },
+            structuredContent,
         };
     });
     server.registerTool("search-entries", {
@@ -299,7 +540,7 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
         const projectId = resolveProjectId(provided);
         await ensureMigrated(projectId);
         const entries = await loadEntries(projectId, {
-            kinds: kind ? [kind] : undefined,
+            kind,
             tags,
         });
         const customSlices = await loadCustomSlices(projectId);
@@ -377,12 +618,17 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
         .describe("compact=minimal list; detail=full entries; table=rows for API-like kinds (method/path columns)");
     server.registerTool("get-slice", {
         title: "Get Slice",
-        description: "Returns a horizontal project view: filtered entries transformed for agents. Empty slice = no entries with matching kind. Call list-slices first to pick sliceId. format=compact default; table for api slice. Use offset for pagination (limit max 200).",
+        description: "Returns a horizontal project view: filtered entries transformed for agents. Empty slice = no entries with matching kind. Call list-slices first to pick sliceId. format=compact default; table for api/ui slice. Use offset/limit for pagination. Filter further by moduleName or tags.",
         inputSchema: {
             projectId: z.string().optional().describe("Project id"),
             sliceId: z
                 .string()
-                .describe("Built-in id (api, domain, persistence, …) or custom id from list-slices"),
+                .describe("Built-in id (api, ui, domain, persistence, …) or custom id from list-slices"),
+            moduleName: z.string().optional().describe("Filter by refs.moduleName"),
+            tags: z
+                .array(z.string())
+                .optional()
+                .describe("Filter entries having any of these tags"),
             query: z
                 .string()
                 .optional()
@@ -414,6 +660,8 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
         }
         const combinedFilter = {
             ...filter,
+            moduleName: params.moduleName ?? filter.moduleName,
+            tags: params.tags ?? filter.tags,
             query: params.query ?? filter.query,
         };
         const entries = await loadEntries(projectId, combinedFilter);

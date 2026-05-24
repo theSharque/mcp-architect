@@ -85,8 +85,44 @@ function entryToIndexItem(entry) {
         kind: entry.kind,
         title: entry.title,
         tags: entry.tags,
+        moduleName: entry.refs?.moduleName,
         updatedAt: entry.updatedAt,
     };
+}
+function resolveKinds(filter) {
+    if (filter?.kinds?.length) {
+        return filter.kinds;
+    }
+    if (filter?.kind) {
+        return [filter.kind];
+    }
+    return undefined;
+}
+export function matchesEntryFilterFields(item, filter) {
+    if (!filter) {
+        return true;
+    }
+    const kinds = resolveKinds(filter);
+    if (kinds?.length && !kinds.includes(item.kind)) {
+        return false;
+    }
+    if (filter.moduleName && item.moduleName !== filter.moduleName) {
+        return false;
+    }
+    if (filter.tags?.length) {
+        const tags = item.tags ?? [];
+        if (!filter.tags.some((t) => tags.includes(t))) {
+            return false;
+        }
+    }
+    if (filter.query) {
+        const q = filter.query.trim().toLowerCase();
+        const haystack = [item.title, item.kind, ...(item.tags ?? [])].join(' ').toLowerCase();
+        if (!haystack.includes(q)) {
+            return false;
+        }
+    }
+    return true;
 }
 export async function readEntry(projectId, entryId) {
     try {
@@ -143,25 +179,7 @@ export function filterIndexItems(items, filter) {
     if (!filter) {
         return items;
     }
-    return items.filter((item) => {
-        if (filter.kinds?.length && !filter.kinds.includes(item.kind)) {
-            return false;
-        }
-        if (filter.tags?.length) {
-            const tags = item.tags ?? [];
-            if (!filter.tags.some((t) => tags.includes(t))) {
-                return false;
-            }
-        }
-        if (filter.query) {
-            const q = filter.query.trim().toLowerCase();
-            const haystack = [item.title, item.kind, ...(item.tags ?? [])].join(' ').toLowerCase();
-            if (!haystack.includes(q)) {
-                return false;
-            }
-        }
-        return true;
-    });
+    return items.filter((item) => matchesEntryFilterFields(item, filter));
 }
 export async function loadEntries(projectId, filter) {
     const index = await readEntryIndexRaw(projectId);

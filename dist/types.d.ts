@@ -12,13 +12,46 @@ export interface ModuleFactInput {
     title: string;
     summary: string;
     payload?: Record<string, unknown>;
-    refs?: Omit<EntryRefs, 'moduleName'>;
+    refs?: EntryRefs;
     tags?: string[];
 }
 export interface UpsertFactsResult {
     entriesCreated: number;
     entriesUpdated: number;
     entryIds: string[];
+    warning?: string;
+}
+export interface ReplaceEntriesScope {
+    kind?: string;
+    kinds?: string[];
+    moduleName?: string;
+    tags?: string[];
+}
+export type UpsertKeyField = 'kind' | 'title' | 'id';
+export interface ReplaceEntriesResult {
+    created: number;
+    updated: number;
+    deleted: number;
+    entryIds: string[];
+}
+export interface DeleteEntriesResult {
+    deleted: number;
+}
+export interface ImportStats {
+    byKind: Record<string, number>;
+    byModule: Record<string, number>;
+    byTag: Record<string, number>;
+    total: number;
+}
+export interface ImportValidationWarning {
+    code: string;
+    detail: string;
+    entryIndex?: number;
+}
+export interface ImportValidationResult {
+    valid: boolean;
+    warningCount: number;
+    warnings: ImportValidationWarning[];
 }
 export interface Entry {
     id: string;
@@ -36,6 +69,7 @@ export interface EntryIndexItem {
     kind: string;
     title: string;
     tags?: string[];
+    moduleName?: string;
     updatedAt: string;
 }
 export interface EntryIndex {
@@ -113,7 +147,9 @@ export interface ModuleDetails {
     updatedAt: string;
 }
 export interface EntryFilter {
+    kind?: string;
     kinds?: string[];
+    moduleName?: string;
     tags?: string[];
     query?: string;
 }

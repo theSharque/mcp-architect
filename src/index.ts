@@ -241,6 +241,7 @@ server.registerTool(
  */
 const moduleFactRefsSchema = z
   .object({
+    moduleName: z.string().optional().describe("Module name; set-module-details sets this automatically"),
     files: z.array(z.string()).optional(),
     entryIds: z.array(z.string()).optional(),
   })

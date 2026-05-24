@@ -21,6 +21,7 @@ export declare function getEntryFile(projectId: string, entryId: string): string
 export declare function getEntryIndexFile(projectId: string): string;
 export declare function getSliceFile(projectId: string, sliceId: string): string;
 export declare function readEntryIndex(projectId: string): Promise<EntryIndex>;
+export declare function matchesEntryFilterFields(item: Pick<EntryIndexItem, 'kind' | 'title' | 'tags' | 'moduleName'>, filter?: EntryFilter): boolean;
 export declare function readEntry(projectId: string, entryId: string): Promise<Entry | null>;
 export declare function writeEntry(projectId: string, entry: Entry): Promise<void>;
 export declare function deleteEntry(projectId: string, entryId: string): Promise<void>;

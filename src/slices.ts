@@ -27,6 +27,12 @@ export const BUILTIN_SLICES: BuiltinSliceInfo[] = [
     ],
   },
   {
+    id: 'ui',
+    title: 'UI and views',
+    description: 'Thymeleaf templates, UI routes, and view definitions',
+    kinds: ['http-endpoint', 'view'],
+  },
+  {
     id: 'persistence',
     title: 'Persistence',
     description: 'Tables, entities, repositories, migrations',
@@ -107,7 +113,11 @@ export function resolveSliceFilter(
 }
 
 export function matchesEntryFilter(entry: Entry, filter: EntryFilter): boolean {
-  if (filter.kinds?.length && !filter.kinds.includes(entry.kind)) {
+  const kinds = filter.kinds ?? (filter.kind ? [filter.kind] : undefined);
+  if (kinds?.length && !kinds.includes(entry.kind)) {
+    return false;
+  }
+  if (filter.moduleName && entry.refs?.moduleName !== filter.moduleName) {
     return false;
   }
   if (filter.tags?.length) {

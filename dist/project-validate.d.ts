@@ -7,7 +7,6 @@ export interface ProjectValidationOptions {
     checkEmptySlices?: boolean;
     checkSliceCoverage?: boolean;
     checkModuleEntryCounts?: boolean;
-    moduleEntryMax?: number;
     moduleEntryMin?: number;
 }
 export declare function runProjectValidation(projectId: string, options?: ProjectValidationOptions): Promise<ProjectValidationResult>;

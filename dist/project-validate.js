@@ -174,12 +174,10 @@ export async function runProjectValidation(projectId, options = {}) {
         if (checkModuleEntryCounts) {
             checksRun.push('module-entry-counts');
             const countResult = validateModuleEntryCounts(architecture, entries, {
-                moduleEntryMax: options.moduleEntryMax,
                 moduleEntryMin: options.moduleEntryMin,
             });
             issues.push(...countResult.issues);
             coverage = mergeCoverage(coverage ?? emptyCoverage(), {
-                modulesTooManyEntries: countResult.modulesTooManyEntries,
                 modulesTooFewEntries: countResult.modulesTooFewEntries,
             });
         }

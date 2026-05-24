@@ -31,7 +31,7 @@ Do **not** import the whole repo in one step. Architector stores data in `~/.mcp
 For each module:
 
 - `set-module-details` with `files[]` + `facts[]` (http-endpoint, entity, glossary, script, …).
-- Max **1000** facts per call (`set-entries` / `replace-entries`); batch if needed.
+- Max **50** entries per bulk call (`set-entries`, `replace-entries`, `import-entries`); split larger catalogs into repeated 50-entry batches.
 - Link every fact: `refs.moduleName` = module name. Do not paste module description into entry summaries.
 - `validate` after each module (compact report only — do not reload full project).
 

@@ -9,6 +9,10 @@ export const ENTRIES_MODULE_REMINDER =
   'before or when adding entries. Set refs.moduleName to an existing module name from list-modules. ' +
   'Run validate after edits to find entries-without-modules, entry-unlinked, or empty slices.';
 
+export const BULK_BATCH_GUIDANCE =
+  'Max 50 entries per bulk call—split large catalogs into batches of ~50 to avoid oversized tool payloads. ' +
+  'For full re-import: delete-entries once, then set-entries in 50-entry chunks; or replace-entries with deleteOrphans=false until the final batch (deleteOrphans=true).';
+
 export function suggestKindsFromFiles(files: string[]): string[] {
   const kinds = new Set<string>();
   for (const file of files) {

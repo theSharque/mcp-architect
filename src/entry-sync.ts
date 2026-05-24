@@ -21,8 +21,15 @@ import type {
   UpsertKeyField,
 } from './types.js';
 
-export const MAX_BULK_ENTRIES = 1000;
-export const BULK_ENTRIES_WARN_THRESHOLD = 500;
+export const MAX_BULK_ENTRIES = 50;
+
+export function assertBulkEntryLimit(count: number, operation = 'bulk operation'): void {
+  if (count > MAX_BULK_ENTRIES) {
+    throw new Error(
+      `Too many entries for ${operation}: max ${MAX_BULK_ENTRIES} per call. Split into batches of ~${MAX_BULK_ENTRIES}.`
+    );
+  }
+}
 
 export function resolveEntryRefs(
   fact: ModuleFactInput,
@@ -91,18 +98,12 @@ export async function upsertFacts(
   facts: ModuleFactInput[],
   batchModuleName?: string
 ): Promise<UpsertFactsResult> {
-  if (facts.length > MAX_BULK_ENTRIES) {
-    throw new Error(`Too many facts: max ${MAX_BULK_ENTRIES} per call`);
-  }
+  assertBulkEntryLimit(facts.length, 'set-entries');
 
   const now = new Date().toISOString();
   let entriesCreated = 0;
   let entriesUpdated = 0;
   const entryIds: string[] = [];
-  let warning: string | undefined;
-  if (facts.length > BULK_ENTRIES_WARN_THRESHOLD) {
-    warning = `Large batch: ${facts.length} entries (threshold ${BULK_ENTRIES_WARN_THRESHOLD})`;
-  }
 
   for (const fact of facts) {
     const existing = await findEntryByKindTitle(projectId, fact.kind, fact.title);
@@ -130,7 +131,7 @@ export async function upsertFacts(
     }
   }
 
-  return { entriesCreated, entriesUpdated, entryIds, warning };
+  return { entriesCreated, entriesUpdated, entryIds };
 }
 
 export async function deleteEntriesByFilter(
@@ -154,9 +155,7 @@ export async function replaceEntries(
     batchModuleName?: string;
   }
 ): Promise<ReplaceEntriesResult> {
-  if (entries.length > MAX_BULK_ENTRIES) {
-    throw new Error(`Too many entries: max ${MAX_BULK_ENTRIES} per call`);
-  }
+  assertBulkEntryLimit(entries.length, 'replace-entries');
 
   const upsertBy = options?.upsertBy ?? ['kind', 'title'];
   const deleteOrphans = options?.deleteOrphans ?? true;
@@ -247,6 +246,8 @@ export async function validateImportEntries(
     checkModuleExists?: boolean;
   }
 ): Promise<ImportValidationResult> {
+  assertBulkEntryLimit(entries.length, 'validate-import');
+
   const upsertBy = options?.upsertBy ?? ['kind', 'title'];
   const checkDuplicates = options?.checkDuplicates ?? true;
   const checkModuleExists = options?.checkModuleExists ?? true;

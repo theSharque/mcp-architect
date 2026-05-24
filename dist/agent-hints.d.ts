@@ -1,5 +1,6 @@
 export declare const MODULE_ENTRIES_REMINDER: string;
 export declare const ENTRIES_MODULE_REMINDER: string;
+export declare const BULK_BATCH_GUIDANCE: string;
 export declare function suggestKindsFromFiles(files: string[]): string[];
 export interface EntryLinkHints {
     reminder?: string;

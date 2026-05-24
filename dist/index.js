@@ -9,7 +9,8 @@ import { v4 as uuidv4 } from "uuid";
 import { readArchitecture, writeArchitecture, readModule, writeModule, deleteModule, listProjects, normalizeProjectId, rebuildEntryIndex, } from "./storage.js";
 import { registerEntriesAndSlicesTools } from "./tools-entries-slices.js";
 import { MODULE_ENTRIES_REMINDER, suggestKindsFromFiles } from "./agent-hints.js";
-import { upsertFacts } from "./entry-sync.js";
+import { upsertFacts, MAX_BULK_ENTRIES } from "./entry-sync.js";
+import { BULK_BATCH_GUIDANCE } from "./agent-hints.js";
 import { runProjectValidation } from "./project-validate.js";
 import { buildDataFlowFromDependsOn, buildDataFlowFromModules, diffFlowEdges, mergeDataFlow, mergeModules, pruneDataFlow, recomputeProvidesTo, removeModuleFromDataFlow, syncModuleDependsOn, } from "./data-flow.js";
 function resolveProjectId(provided) {
@@ -196,7 +197,9 @@ const moduleFactSchema = z.object({
 });
 server.registerTool("set-module-details", {
     title: "Set Module Details",
-    description: "Creates or updates one vertical module (files, dependencies, dataFlow sync). IMPORTANT: Slices (api, domain, persistence) are built from entries, not from module text. When adding or updating a module, also add entries this module owns: pass facts[] (http-endpoint, entity, glossary, …) in this call, or call set-entry / set-entries with refs.moduleName=<module name>. Without entries, get-slice will be empty for this module. After edits call validate to verify links. Does not replace other modules. Prefer over set-project-architecture for single-module edits.",
+    description: "Creates or updates one vertical module (files, dependencies, dataFlow sync). IMPORTANT: Slices (api, domain, persistence) are built from entries, not from module text. When adding or updating a module, also add entries this module owns: pass facts[] (http-endpoint, entity, glossary, …) in this call (max 50 per call), or call set-entry / set-entries in 50-entry batches with refs.moduleName=<module name>. " +
+        BULK_BATCH_GUIDANCE +
+        " Without entries, get-slice will be empty for this module. After edits call validate to verify links. Does not replace other modules. Prefer over set-project-architecture for single-module edits.",
     inputSchema: {
         projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
         name: z.string().describe("Module name"),
@@ -210,8 +213,9 @@ server.registerTool("set-module-details", {
             .describe("Files belonging to this module; add matching entry kinds per Controller/Repository"),
         facts: z
             .array(moduleFactSchema)
+            .max(MAX_BULK_ENTRIES)
             .optional()
-            .describe("Horizontal facts for this module (APIs, entities, terms). Preferred over separate set-entry calls. Each becomes an entry with refs.moduleName set automatically. Omit only for skeleton modules."),
+            .describe(`Horizontal facts for this module (APIs, entities, terms). Max ${MAX_BULK_ENTRIES} per call; use set-entries for more. Each becomes an entry with refs.moduleName set automatically.`),
         usageExamples: z.array(z.object({
             title: z.string().describe("Example title"),
             description: z.string().optional().describe("Description of the example"),
@@ -637,11 +641,7 @@ const validationInputSchema = {
     checkModuleEntryCounts: z
         .boolean()
         .optional()
-        .describe("Check module entry count thresholds (default true)"),
-    moduleEntryMax: z
-        .number()
-        .optional()
-        .describe("Max entries per module before module-too-many-entries (default 50)"),
+        .describe("Check module-too-few-entries when moduleEntryMin is set (default true)"),
     moduleEntryMin: z
         .number()
         .optional()
@@ -657,7 +657,6 @@ async function runValidationTool(params) {
         checkEmptySlices: params.checkEmptySlices,
         checkSliceCoverage: params.checkSliceCoverage,
         checkModuleEntryCounts: params.checkModuleEntryCounts,
-        moduleEntryMax: params.moduleEntryMax,
         moduleEntryMin: params.moduleEntryMin,
     });
     const text = `${result.summary}\n\n${JSON.stringify(result, null, 2)}`;
@@ -668,7 +667,7 @@ async function runValidationTool(params) {
 }
 server.registerTool("validate", {
     title: "Validate Project",
-    description: "Run after set-project-architecture, set-module-details, set-entry, or set-entries. Returns a compact report (summary, stats, issues by kind)—no need to load the full project in the agent. Checks only known rules: dataFlow consistency, module↔entry links, module detail files, entry index drift, empty api/domain/persistence slices, entry slice coverage, module entry count thresholds. Fix issues[] then call validate again.",
+    description: "Run after set-project-architecture, set-module-details, set-entry, or set-entries. Returns a compact report (summary, stats, issues by kind)—no need to load the full project in the agent. Checks only known rules: dataFlow consistency, module↔entry links, module detail files, entry index drift, empty api/domain/persistence slices, entry slice coverage, optional module-too-few-entries when moduleEntryMin is set. Fix issues[] then call validate again.",
     inputSchema: validationInputSchema,
     outputSchema: validationOutputSchema,
 }, async (params) => runValidationTool(params));

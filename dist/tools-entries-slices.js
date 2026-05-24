@@ -3,8 +3,8 @@ import { v4 as uuidv4 } from "uuid";
 import { BUILTIN_SLICES, buildSliceResponse, clampLimit, clampOffset, countEntriesForKinds, getBuiltinSlice, resolveSliceFilter, } from "./slices.js";
 import { deleteEntry, deleteSlice, filterIndexItems, findEntryByKindTitle, loadEntries, readArchitecture, readEntry, readEntryIndex, readSlice, writeEntry, writeSlice, listSliceIds, } from "./storage.js";
 import { migrateScriptsToEntries } from "./migrate-scripts.js";
-import { ENTRIES_MODULE_REMINDER, buildEntryLinkHints } from "./agent-hints.js";
-import { BULK_ENTRIES_WARN_THRESHOLD, MAX_BULK_ENTRIES, computeImportStats, deleteEntriesByFilter, replaceEntries, upsertFacts, validateImportEntries, } from "./entry-sync.js";
+import { ENTRIES_MODULE_REMINDER, BULK_BATCH_GUIDANCE, buildEntryLinkHints } from "./agent-hints.js";
+import { MAX_BULK_ENTRIES, computeImportStats, deleteEntriesByFilter, replaceEntries, upsertFacts, validateImportEntries, } from "./entry-sync.js";
 import { searchEntries } from "./entry-search.js";
 import { loadCustomSlices } from "./slice-coverage.js";
 const replaceScopeSchema = z.object({
@@ -146,7 +146,7 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
     });
     server.registerTool("set-entries", {
         title: "Set Entries",
-        description: `${ENTRIES_MODULE_REMINDER} Bulk upsert entries (max ${MAX_BULK_ENTRIES} per call; warn above ${BULK_ENTRIES_WARN_THRESHOLD}). Set refs.moduleName per entry, or pass top-level moduleName as default for entries without refs.moduleName. Prefer replace-entries for full idempotent sync of a module/kind slice.`,
+        description: `${ENTRIES_MODULE_REMINDER} ${BULK_BATCH_GUIDANCE} Set refs.moduleName per entry, or pass top-level moduleName as default. Prefer set-entries in 50-entry chunks over one huge replace-entries payload.`,
         inputSchema: {
             projectId: z.string().optional().describe("Project id"),
             moduleName: z
@@ -155,7 +155,8 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
                 .describe("Default refs.moduleName for entries that omit refs.moduleName"),
             entries: z
                 .array(moduleFactSchema)
-                .describe(`Array of facts to upsert (max ${MAX_BULK_ENTRIES})`),
+                .max(MAX_BULK_ENTRIES)
+                .describe(`Facts to upsert (max ${MAX_BULK_ENTRIES} per call; use multiple calls for larger catalogs)`),
         },
         outputSchema: {
             entriesCreated: z.number(),
@@ -179,9 +180,6 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
             ...linkHints,
         };
         const textParts = [`Entries saved: ${structuredContent.message}`];
-        if (upsert.warning) {
-            textParts.push(upsert.warning);
-        }
         if (linkHints.reminder) {
             textParts.push(linkHints.reminder);
         }
@@ -240,7 +238,7 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
     });
     server.registerTool("replace-entries", {
         title: "Replace Entries",
-        description: "Idempotent sync: upsert entries in scope and optionally delete orphans not in the batch. Main tool for full API/UI catalog import—one call per module or kind. Match existing entries by upsertBy (default kind+title). Each entry may set refs.moduleName individually.",
+        description: `${BULK_BATCH_GUIDANCE} Idempotent sync for up to ${MAX_BULK_ENTRIES} entries in scope; optionally delete orphans not in this batch. Match by upsertBy (default kind+title). For large catalogs use deleteOrphans=false on intermediate batches, true only on the last batch.`,
         inputSchema: {
             projectId: z.string().optional().describe("Project id"),
             scope: replaceScopeSchema.describe("Which existing entries participate in orphan deletion"),
@@ -254,11 +252,12 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
                 .describe("Fields used to match existing entries (default kind+title)"),
             entries: z
                 .array(moduleFactSchema)
-                .describe(`Full desired set for this scope (max ${MAX_BULK_ENTRIES})`),
+                .max(MAX_BULK_ENTRIES)
+                .describe(`Batch slice for this scope (max ${MAX_BULK_ENTRIES}; repeat calls for larger catalogs)`),
             deleteOrphans: z
                 .boolean()
                 .optional()
-                .describe("Delete scope entries missing from batch (default true)"),
+                .describe("Delete scope entries missing from this batch (default true; set false until final batch)"),
         },
         outputSchema: {
             created: z.number(),
@@ -283,7 +282,7 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
     });
     server.registerTool("import-entries", {
         title: "Import Entries",
-        description: "Alias for replace-entries with explicit import semantics. mode=replace performs full slice replacement (same as replace-entries). Pass filter as scope; entries is the complete desired set for that slice.",
+        description: `${BULK_BATCH_GUIDANCE} Alias for replace-entries (mode=replace). Pass filter as scope; send up to ${MAX_BULK_ENTRIES} entries per call.`,
         inputSchema: {
             projectId: z.string().optional().describe("Project id"),
             mode: z
@@ -300,11 +299,12 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
                 .describe("Match keys (default kind+title)"),
             entries: z
                 .array(moduleFactSchema)
-                .describe(`Complete import batch (max ${MAX_BULK_ENTRIES})`),
+                .max(MAX_BULK_ENTRIES)
+                .describe(`Import batch (max ${MAX_BULK_ENTRIES} per call)`),
             deleteOrphans: z
                 .boolean()
                 .optional()
-                .describe("Delete scope entries missing from batch (default true)"),
+                .describe("Delete scope entries missing from this batch (default true; set false until final batch)"),
         },
         outputSchema: {
             created: z.number(),
@@ -329,10 +329,13 @@ export function registerEntriesAndSlicesTools(server, resolveProjectId) {
     });
     server.registerTool("validate-import", {
         title: "Validate Import",
-        description: "Dry-run validation for a proposed import batch. Checks duplicate upsert keys and unknown moduleName refs without writing.",
+        description: `Dry-run validation for a proposed import batch (max ${MAX_BULK_ENTRIES} entries). ${BULK_BATCH_GUIDANCE} Checks duplicate upsert keys and unknown moduleName refs without writing.`,
         inputSchema: {
             projectId: z.string().optional().describe("Project id"),
-            entries: z.array(moduleFactSchema).describe("Proposed entries to validate"),
+            entries: z
+                .array(moduleFactSchema)
+                .max(MAX_BULK_ENTRIES)
+                .describe(`Proposed entries to validate (max ${MAX_BULK_ENTRIES})`),
             upsertBy: z
                 .array(z.enum(["kind", "title", "id"]))
                 .optional()

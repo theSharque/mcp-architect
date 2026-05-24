@@ -19,7 +19,6 @@ export interface UpsertFactsResult {
     entriesCreated: number;
     entriesUpdated: number;
     entryIds: string[];
-    warning?: string;
 }
 export interface ReplaceEntriesScope {
     kind?: string;

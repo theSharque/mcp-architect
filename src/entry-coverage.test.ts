@@ -90,8 +90,8 @@ describe('validateEntryCoverage', () => {
 });
 
 describe('validateModuleEntryCounts', () => {
-  it('reports module-too-many-entries when count exceeds max', () => {
-    const entries: Entry[] = Array.from({ length: 51 }, (_, index) => ({
+  it('does not warn when module has many entries', () => {
+    const entries: Entry[] = Array.from({ length: 100 }, (_, index) => ({
       id: `e${index}`,
       kind: 'http-endpoint',
       title: `GET /x${index}`,
@@ -100,8 +100,8 @@ describe('validateModuleEntryCounts', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     }));
-    const { issues } = validateModuleEntryCounts(architecture, entries, { moduleEntryMax: 50 });
-    assert.ok(issues.some((i) => i.kind === 'module-too-many-entries'));
+    const { issues } = validateModuleEntryCounts(architecture, entries);
+    assert.equal(issues.some((i) => i.kind === 'module-too-many-entries'), false);
   });
 
   it('reports module-too-few-entries when count is below min but above zero', () => {

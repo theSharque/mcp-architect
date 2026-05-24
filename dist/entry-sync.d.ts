@@ -1,6 +1,6 @@
 import type { DeleteEntriesResult, Entry, EntryFilter, EntryRefs, ImportStats, ImportValidationResult, ModuleFactInput, ReplaceEntriesResult, ReplaceEntriesScope, UpsertFactsResult, UpsertKeyField } from './types.js';
-export declare const MAX_BULK_ENTRIES = 1000;
-export declare const BULK_ENTRIES_WARN_THRESHOLD = 500;
+export declare const MAX_BULK_ENTRIES = 50;
+export declare function assertBulkEntryLimit(count: number, operation?: string): void;
 export declare function resolveEntryRefs(fact: ModuleFactInput, batchModuleName?: string): EntryRefs | undefined;
 export declare function buildUpsertKey(entry: {
     kind: string;

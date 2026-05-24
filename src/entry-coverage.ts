@@ -23,7 +23,6 @@ function fileMatches(file: string, pattern: RegExp): boolean {
 }
 
 export interface ModuleEntryCountOptions {
-  moduleEntryMax?: number;
   moduleEntryMin?: number;
 }
 
@@ -43,28 +42,17 @@ export function validateModuleEntryCounts(
   architecture: ProjectArchitecture | null,
   entries: Entry[],
   options: ModuleEntryCountOptions = {}
-): { issues: ValidationIssue[]; modulesTooManyEntries: number; modulesTooFewEntries: number } {
+): { issues: ValidationIssue[]; modulesTooFewEntries: number } {
   const issues: ValidationIssue[] = [];
-  let modulesTooManyEntries = 0;
   let modulesTooFewEntries = 0;
-  const moduleEntryMax = options.moduleEntryMax ?? 50;
   const moduleEntryMin = options.moduleEntryMin;
 
   if (!architecture) {
-    return { issues, modulesTooManyEntries, modulesTooFewEntries };
+    return { issues, modulesTooFewEntries };
   }
 
   for (const mod of architecture.modules) {
     const count = entriesForModule(entries, mod.name).length;
-
-    if (count > moduleEntryMax) {
-      modulesTooManyEntries += 1;
-      issues.push({
-        kind: 'module-too-many-entries',
-        module: mod.name,
-        detail: `Module '${mod.name}' has ${count} entries (max ${moduleEntryMax})—consider splitting the module`,
-      });
-    }
 
     if (
       moduleEntryMin !== undefined &&
@@ -81,7 +69,7 @@ export function validateModuleEntryCounts(
     }
   }
 
-  return { issues, modulesTooManyEntries, modulesTooFewEntries };
+  return { issues, modulesTooFewEntries };
 }
 
 export function validateEntryCoverage(

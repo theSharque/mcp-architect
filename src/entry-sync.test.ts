@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   buildUpsertKey,
   computeImportStats,
+  assertBulkEntryLimit,
+  MAX_BULK_ENTRIES,
   matchesEntryScope,
   resolveEntryRefs,
   validateImportEntries,
@@ -103,6 +105,15 @@ describe('computeImportStats', () => {
     assert.equal(stats.byModule.postgres, 2);
     assert.equal(stats.byTag.ui, 2);
     assert.equal(stats.byTag.api, 1);
+  });
+});
+
+describe('assertBulkEntryLimit', () => {
+  it('rejects batches above MAX_BULK_ENTRIES', () => {
+    assert.throws(
+      () => assertBulkEntryLimit(MAX_BULK_ENTRIES + 1, 'set-entries'),
+      /max 50 per call/
+    );
   });
 });
 

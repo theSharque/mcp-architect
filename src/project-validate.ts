@@ -30,7 +30,6 @@ export interface ProjectValidationOptions {
   checkEmptySlices?: boolean;
   checkSliceCoverage?: boolean;
   checkModuleEntryCounts?: boolean;
-  moduleEntryMax?: number;
   moduleEntryMin?: number;
 }
 
@@ -242,12 +241,10 @@ export async function runProjectValidation(
     if (checkModuleEntryCounts) {
       checksRun.push('module-entry-counts');
       const countResult = validateModuleEntryCounts(architecture, entries, {
-        moduleEntryMax: options.moduleEntryMax,
         moduleEntryMin: options.moduleEntryMin,
       });
       issues.push(...countResult.issues);
       coverage = mergeCoverage(coverage ?? emptyCoverage(), {
-        modulesTooManyEntries: countResult.modulesTooManyEntries,
         modulesTooFewEntries: countResult.modulesTooFewEntries,
       });
     }

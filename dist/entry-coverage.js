@@ -23,23 +23,13 @@ function emptyEntryCoverage() {
 }
 export function validateModuleEntryCounts(architecture, entries, options = {}) {
     const issues = [];
-    let modulesTooManyEntries = 0;
     let modulesTooFewEntries = 0;
-    const moduleEntryMax = options.moduleEntryMax ?? 50;
     const moduleEntryMin = options.moduleEntryMin;
     if (!architecture) {
-        return { issues, modulesTooManyEntries, modulesTooFewEntries };
+        return { issues, modulesTooFewEntries };
     }
     for (const mod of architecture.modules) {
         const count = entriesForModule(entries, mod.name).length;
-        if (count > moduleEntryMax) {
-            modulesTooManyEntries += 1;
-            issues.push({
-                kind: 'module-too-many-entries',
-                module: mod.name,
-                detail: `Module '${mod.name}' has ${count} entries (max ${moduleEntryMax})—consider splitting the module`,
-            });
-        }
         if (moduleEntryMin !== undefined &&
             moduleEntryMin > 1 &&
             count > 0 &&
@@ -52,7 +42,7 @@ export function validateModuleEntryCounts(architecture, entries, options = {}) {
             });
         }
     }
-    return { issues, modulesTooManyEntries, modulesTooFewEntries };
+    return { issues, modulesTooFewEntries };
 }
 export function validateEntryCoverage(architecture, entries, moduleDetailsMap) {
     const issues = [];

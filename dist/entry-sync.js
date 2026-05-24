@@ -1,7 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
 import { deleteEntry, findEntryByKindTitle, loadEntries, readArchitecture, writeEntry, } from './storage.js';
-export const MAX_BULK_ENTRIES = 1000;
-export const BULK_ENTRIES_WARN_THRESHOLD = 500;
+export const MAX_BULK_ENTRIES = 50;
+export function assertBulkEntryLimit(count, operation = 'bulk operation') {
+    if (count > MAX_BULK_ENTRIES) {
+        throw new Error(`Too many entries for ${operation}: max ${MAX_BULK_ENTRIES} per call. Split into batches of ~${MAX_BULK_ENTRIES}.`);
+    }
+}
 export function resolveEntryRefs(fact, batchModuleName) {
     const moduleName = fact.refs?.moduleName ?? batchModuleName;
     const refs = {
@@ -54,17 +58,11 @@ export function matchesEntryScope(entry, scope) {
     return true;
 }
 export async function upsertFacts(projectId, facts, batchModuleName) {
-    if (facts.length > MAX_BULK_ENTRIES) {
-        throw new Error(`Too many facts: max ${MAX_BULK_ENTRIES} per call`);
-    }
+    assertBulkEntryLimit(facts.length, 'set-entries');
     const now = new Date().toISOString();
     let entriesCreated = 0;
     let entriesUpdated = 0;
     const entryIds = [];
-    let warning;
-    if (facts.length > BULK_ENTRIES_WARN_THRESHOLD) {
-        warning = `Large batch: ${facts.length} entries (threshold ${BULK_ENTRIES_WARN_THRESHOLD})`;
-    }
     for (const fact of facts) {
         const existing = await findEntryByKindTitle(projectId, fact.kind, fact.title);
         const entryId = existing?.id ?? uuidv4();
@@ -89,7 +87,7 @@ export async function upsertFacts(projectId, facts, batchModuleName) {
             entriesCreated += 1;
         }
     }
-    return { entriesCreated, entriesUpdated, entryIds, warning };
+    return { entriesCreated, entriesUpdated, entryIds };
 }
 export async function deleteEntriesByFilter(projectId, filter) {
     const entries = await loadEntries(projectId, filter);
@@ -99,9 +97,7 @@ export async function deleteEntriesByFilter(projectId, filter) {
     return { deleted: entries.length };
 }
 export async function replaceEntries(projectId, scope, entries, options) {
-    if (entries.length > MAX_BULK_ENTRIES) {
-        throw new Error(`Too many entries: max ${MAX_BULK_ENTRIES} per call`);
-    }
+    assertBulkEntryLimit(entries.length, 'replace-entries');
     const upsertBy = options?.upsertBy ?? ['kind', 'title'];
     const deleteOrphans = options?.deleteOrphans ?? true;
     const scopeHasFilter = Boolean(scope.kind || scope.kinds?.length || scope.moduleName || scope.tags?.length);
@@ -170,6 +166,7 @@ export function computeImportStats(entries) {
     return { byKind, byModule, byTag, total: entries.length };
 }
 export async function validateImportEntries(projectId, entries, options) {
+    assertBulkEntryLimit(entries.length, 'validate-import');
     const upsertBy = options?.upsertBy ?? ['kind', 'title'];
     const checkDuplicates = options?.checkDuplicates ?? true;
     const checkModuleExists = options?.checkModuleExists ?? true;

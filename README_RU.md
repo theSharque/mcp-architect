@@ -103,6 +103,7 @@
 6. После правок → `validate` (краткий отчёт и `issues[]`, без загрузки всего проекта).
 7. Категория (все API, домен) → `list-slices` → `get-slice`; при `hasMore` — `offset`.
 8. Поиск по имени → `search-entries` → `get-entry`.
+9. **После рефакторинга кода (модули те же)** → `refactor-architecture`: `scan` → dryRun preview → apply с `confirm=true`.
 
 | Сценарий | Tool |
 |----------|------|
@@ -111,6 +112,7 @@
 | Patch dataFlow одного модуля | `set-module-data-flow` |
 | Пересчитать все рёбра | `rebuild-data-flow` |
 | Проверка после правок | `validate` |
+| Синхронизация путей/имён после рефакторинга | `refactor-architecture` (dryRun, затем confirm) |
 | Рассинхрон index | `rebuild-entry-index` |
 | Проект с нуля | `set-project-architecture` с `replaceModules: true` |
 | Onboarding свежего git clone (по фазам) | Скопировать [`.cursor/rules/architector-onboarding.mdc`](.cursor/rules/architector-onboarding.mdc) → попросить агента onboard по шагам |
@@ -343,6 +345,22 @@ Patch `dataFlow` одного модуля: `moduleName`, `dependsOn`, `dataTran
 **Проверяет:** dataFlow, связь модуль↔entry, файлы модулей, рассинхрон index, пустые срезы api/domain/persistence.
 
 **Выход:** `valid`, `issueCount`, `summary`, `coverage`, `checksRun`.
+
+### refactor-architecture
+
+Preview или apply синхронизации architector после рефакторинга кода, когда границы модулей не меняются. Источник правды — только агент; доступа к workspace и git нет. По умолчанию `dryRun=true`.
+
+**Workflow:** (1) `scan` с `file` или `text` → компактные hits, (2) собрать mutation ops, (3) dryRun preview, (4) apply с `dryRun=false` и `confirm=true`.
+
+**Операции (max 10 за вызов):** `scan`, `move-file`, `replace-path-prefix`, `rename-text`, `patch-entry`, `merge-files`, `remove-file-ref`.
+
+**Scope (опц.):** `moduleName`, `kinds`, `tags` — ограничивает, какие entries/modules затрагиваются.
+
+Orphan entries с пустым `refs.files` и без `refs.entryIds` удаляются после file-операций.
+
+**Вход:** `projectId`, `operations[]`, `scope`, `dryRun` (default `true`), `confirm` (обязателен при apply), `limit`, `offset`
+
+**Выход:** `summary`, `stats`, `hits` (scan) или paginated `changes`, `warnings`, `hasMore`
 
 ### validate-architecture
 

@@ -16,6 +16,7 @@ import {
   rebuildEntryIndex,
 } from "./storage.js";
 import { registerEntriesAndSlicesTools } from "./tools-entries-slices.js";
+import { registerRefactorTools } from "./tools-refactor.js";
 import { MODULE_ENTRIES_REMINDER, suggestKindsFromFiles } from "./agent-hints.js";
 import { upsertFacts, MAX_BULK_ENTRIES } from "./entry-sync.js";
 import { BULK_BATCH_GUIDANCE } from "./agent-hints.js";
@@ -1019,6 +1020,7 @@ server.registerResource(
 );
 
 registerEntriesAndSlicesTools(server, resolveProjectId);
+registerRefactorTools(server, resolveProjectId);
 
 /**
  * Main function to start the MCP server

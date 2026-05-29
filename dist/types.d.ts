@@ -241,4 +241,101 @@ export interface SliceFilterRef {
     sliceId: string;
     filter: EntryFilter;
 }
+export interface RefactorScope {
+    moduleName?: string;
+    kinds?: string[];
+    tags?: string[];
+}
+export type RefactorTextMatch = 'exact' | 'contains';
+export type RefactorTextField = 'title' | 'summary' | 'tags' | 'payload' | 'usageExamples';
+export interface RefactorPatchMatch {
+    id?: string;
+    kind?: string;
+    title?: string;
+}
+export interface RefactorPatchSet {
+    title?: string;
+    summary?: string;
+    payload?: Record<string, unknown>;
+    refs?: EntryRefs;
+    tags?: string[];
+}
+export type RefactorOperation = {
+    type: 'scan';
+    file?: string;
+    text?: string;
+} | {
+    type: 'move-file';
+    from: string;
+    to: string;
+} | {
+    type: 'replace-path-prefix';
+    fromPrefix: string;
+    toPrefix: string;
+} | {
+    type: 'rename-text';
+    from: string;
+    to: string;
+    fields: RefactorTextField[];
+    match: RefactorTextMatch;
+} | {
+    type: 'patch-entry';
+    match: RefactorPatchMatch;
+    set: RefactorPatchSet;
+} | {
+    type: 'merge-files';
+    from: string[];
+    to: string;
+} | {
+    type: 'remove-file-ref';
+    file: string;
+    deleteIfEmpty?: boolean;
+};
+export interface RefactorScanHit {
+    target: 'entry' | 'module';
+    id?: string;
+    moduleName?: string;
+    kind?: string;
+    field: string;
+    value: string;
+    snippet: string;
+}
+export interface RefactorChange {
+    action: 'update' | 'delete';
+    target: 'entry' | 'module';
+    id: string;
+    kind?: string;
+    moduleName?: string;
+    field: string;
+    before?: unknown;
+    after?: unknown;
+}
+export interface RefactorStats {
+    modules: number;
+    entriesUpdated: number;
+    entriesDeleted: number;
+    hits?: number;
+}
+export interface RefactorResult {
+    dryRun: boolean;
+    summary: string;
+    stats: RefactorStats;
+    hits?: RefactorScanHit[];
+    changes: RefactorChange[];
+    warnings: string[];
+    offset: number;
+    hasMore: boolean;
+}
+export interface RefactorRequest {
+    operations: RefactorOperation[];
+    scope?: RefactorScope;
+    dryRun?: boolean;
+    confirm?: boolean;
+    limit?: number;
+    offset?: number;
+}
+export interface RefactorDraftState {
+    entries: Map<string, Entry>;
+    modules: Map<string, ModuleDetails>;
+}
 //# sourceMappingURL=types.d.ts.map

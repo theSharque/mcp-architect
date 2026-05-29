@@ -1,6 +1,6 @@
 {
   "name": "mcp-architector",
-  "version": "1.8.1",
+  "version": "1.9.0",
   "description": "MCP server for architecture and system design",
   "type": "module",
   "main": "dist/index.js",
@@ -11,7 +11,7 @@
     "dev": "tsx watch src/index.ts",
     "inspector": "npx @modelcontextprotocol/inspector node dist/index.js",
     "prepublishOnly": "npm run build",
-    "test:unit": "npm run build && node --test dist/data-flow.test.js dist/entry-coverage.test.js dist/project-validate.test.js dist/slice-coverage.test.js dist/entry-search.test.js dist/entry-sync.test.js"
+    "test:unit": "npm run build && node --test dist/data-flow.test.js dist/entry-coverage.test.js dist/project-validate.test.js dist/slice-coverage.test.js dist/entry-search.test.js dist/entry-sync.test.js dist/refactor.test.js"
   },
   "keywords": ["mcp", "model-context-protocol", "architecture", "system-design"],
   "author": "theSharque",

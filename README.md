@@ -103,6 +103,7 @@ Store and manage project architecture, modules, scripts, data flow, and usage ex
 6. **After edits, verify everything** → `validate` (summary + `issues[]`; no full project load).
 7. **Need a category** (all APIs, all domain terms) → `list-slices` → `get-slice` with `format=compact` or `table`; use `offset` when `hasMore` is true.
 8. **Find by name** → `search-entries` → `get-entry` for full payload.
+9. **After code refactor (same modules)** → `refactor-architecture`: `scan` → dryRun preview → apply with `confirm=true`.
 
 | Scenario | Tool |
 |----------|------|
@@ -111,6 +112,7 @@ Store and manage project architecture, modules, scripts, data flow, and usage ex
 | Patch dataFlow for one module | `set-module-data-flow` |
 | Rebuild all module edges | `rebuild-data-flow` |
 | Diagnose graph + empty slices | `validate` (or `validate-architecture`) |
+| Sync paths/names after refactor | `refactor-architecture` (dryRun, then confirm) |
 | Index out of sync | `rebuild-entry-index` |
 | Create project from scratch | `set-project-architecture` with `replaceModules: true` |
 | Onboard a fresh git clone (phased) | Copy [`.cursor/rules/architector-onboarding.mdc`](.cursor/rules/architector-onboarding.mdc) → ask agent to onboard phase by phase |
@@ -421,6 +423,22 @@ Rebuilds `dataFlow` for all modules from module file `dependencies` or existing 
 **Input:** `projectId`, `checkInverse`, `checkModuleDeps`, `checkEntryCoverage`, `checkStorage`, `checkEmptySlices`, `checkSliceCoverage`, `checkModuleEntryCounts`, `moduleEntryMax` (default `50`), `moduleEntryMin` (optional; omit to disable min check) — all boolean flags default `true` unless noted
 
 **Output:** `valid`, `issueCount`, `summary`, `stats`, `issuesByKind`, `issues[]`, `coverage`, `checksRun`
+
+### refactor-architecture
+
+Preview or apply in-architector sync after a code refactor when module boundaries stay the same. Agent is the source of truth — no workspace or git access. Default `dryRun=true`.
+
+**Workflow:** (1) `scan` with `file` or `text` → compact hits, (2) build mutation ops, (3) dryRun preview, (4) apply with `dryRun=false` and `confirm=true`.
+
+**Operations (max 10 per call):** `scan`, `move-file`, `replace-path-prefix`, `rename-text`, `patch-entry`, `merge-files`, `remove-file-ref`.
+
+**Scope (optional):** `moduleName`, `kinds`, `tags` — limits which entries/modules are touched.
+
+Orphan entries with empty `refs.files` and no `refs.entryIds` are deleted after file operations.
+
+**Input:** `projectId`, `operations[]`, `scope`, `dryRun` (default `true`), `confirm` (required when applying), `limit`, `offset`
+
+**Output:** `summary`, `stats`, `hits` (scan) or paginated `changes`, `warnings`, `hasMore`
 
 ### validate-architecture
 

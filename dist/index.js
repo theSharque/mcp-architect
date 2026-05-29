@@ -8,6 +8,7 @@ import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
 import { readArchitecture, writeArchitecture, readModule, writeModule, deleteModule, listProjects, normalizeProjectId, rebuildEntryIndex, } from "./storage.js";
 import { registerEntriesAndSlicesTools } from "./tools-entries-slices.js";
+import { registerRefactorTools } from "./tools-refactor.js";
 import { MODULE_ENTRIES_REMINDER, suggestKindsFromFiles } from "./agent-hints.js";
 import { upsertFacts, MAX_BULK_ENTRIES } from "./entry-sync.js";
 import { BULK_BATCH_GUIDANCE } from "./agent-hints.js";
@@ -827,6 +828,7 @@ server.registerResource("module", new ResourceTemplate("module://{projectId}/{mo
     };
 });
 registerEntriesAndSlicesTools(server, resolveProjectId);
+registerRefactorTools(server, resolveProjectId);
 /**
  * Main function to start the MCP server
  */

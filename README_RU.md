@@ -46,7 +46,7 @@
    cp /path/to/mcp-architector/.cursor/rules/architector-onboarding.mdc /path/to/your-app/.cursor/rules/
    ```
 
-2. Убедитесь, что MCP Architector настроен с `MCP_PROJECT_ID`, указывающим на этот workspace (см. [Как подключить](#как-подключить-к-claude-desktop--ide)).
+2. Убедитесь, что MCP Architector подключён. Агент должен вызвать `list-projects` и передавать `projectId` в каждый write — не опускать параметр.
 
 3. В чате, например: *«Onboard this repo into architector — phase 0 plan first»* или *«Импортируй архитектуру в architector по модулям»*.
 
@@ -95,7 +95,7 @@
 
 ## Сценарий для агента
 
-1. `list-projects` — проверить `projectId`.
+1. `list-projects` — найти `projectId` этого workspace (query по имени папки). Передавать его в каждый другой tool. Не опускать. Не использовать `default-project`.
 2. Структура → `get-project-architecture` / `set-project-architecture`.
 3. **Каждый модуль** → `set-module-details` с `files` + **`facts[]`** (API, entity, glossary) в одном вызове, или `set-entries` / `set-entry` с `refs.moduleName`.
 4. Граф одного модуля → `set-module-data-flow`.
@@ -267,11 +267,13 @@ npm run inspector
 
 ### Project ID
 
-При вызове инструментов можно:
+`projectId` **обязателен** для всех tools кроме `list-projects`. Общего dump-проекта нет.
 
-1. **Автоматический project ID** (из `${workspaceFolder}`): Просто опустите параметр `projectId`
-2. **Переопределить при вызове**: Передайте `projectId` явно
-3. **По умолчанию**: Если не указано — используется "default-project"
+1. **Сначала `list-projects`** (опционально `query` = имя папки workspace)
+2. **Передайте найденный `projectId`** в каждый другой tool
+3. Если совпадения нет — создайте проект через `set-project-architecture` со стабильным id из пути workspace (например `_qs_my-app`)
+
+`MCP_PROJECT_ID` — только подсказка (`isCurrent` / `suggestedProjectId`), не молчаливый target записи. `default-project` и неподставленный `${workspaceFolder}` запрещены.
 
 ## Инструменты
 
@@ -280,7 +282,7 @@ npm run inspector
 Создаёт или обновляет общую архитектуру проекта. **По умолчанию merge** modules и dataFlow по имени; omit `dataFlow` сохраняет существующий flow. `dependsOn` — канон; `providesTo` пересчитывается при сохранении.
 
 **Вход:**
-- `projectId` (опц.): ID проекта (по умолчанию "default-project")
+- `projectId` (обяз.): ID проекта из `list-projects`. Не опускать. `default-project` запрещён.
 - `description`: Описание проекта
 - `modules`: Массив модулей с полями `name`, `description`, `inputs`, `outputs`
 - `dataFlow` (опц.): Поток данных между модулями (omit — сохранить существующий)
@@ -295,13 +297,15 @@ npm run inspector
 
 ### list-projects
 
-Список всех проектов в локальном хранилище (`~/.mcp-architector`). Нужен, когда workspace может соответствовать другому нормализованному `projectId`.
+Список всех проектов в локальном хранилище (`~/.mcp-architector`). **Вызывать первым.** Сопоставить workspace по имени папки, затем передавать `projectId` в каждый другой tool.
 
 **Вход:**
 - `query` (опц.): Фильтр по подстроке в projectId или description (без учёта регистра)
 
 **Выход:**
-- Массив кратких записей: `projectId`, `description`, `moduleCount`, `updatedAt`, `isCurrent` (совпадает с текущим `MCP_PROJECT_ID`)
+- `projects[]`: `projectId`, `description`, `moduleCount`, `updatedAt`, `isCurrent` (подсказка из `MCP_PROJECT_ID`), `forbidden` (`default-project` и неподставленный workspaceFolder)
+- `suggestedProjectId`: текущий `MCP_PROJECT_ID`, если это валидный id, иначе `null`
+- `reminder`: всегда передавать `projectId`; не использовать `default-project`
 
 ### Entries и slices
 
@@ -406,11 +410,13 @@ mcp-architector/
 
 ### Project ID
 
-Приоритет определения project ID:
+Данные лежат в `~/.mcp-architector/{projectId}/`. `projectId` нужно передавать явно в каждый tool кроме `list-projects`.
 
-1. Явно переданный в параметрах (высший)
-2. Переменная окружения `MCP_PROJECT_ID`
-3. "default-project" (по умолчанию)
+- Сначала `list-projects` (`query` = имя папки workspace)
+- `MCP_PROJECT_ID` — только подсказка в listing (`isCurrent` / `suggestedProjectId`), не молчаливый target записи
+- `default-project` и неподставленный `${workspaceFolder}` запрещены
+
+Новый проект: передайте стабильный id из пути workspace (например `_qs_my-app`) в `set-project-architecture`.
 
 ## Лицензия
 

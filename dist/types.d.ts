@@ -106,6 +106,7 @@ export interface ProjectSummary {
     moduleCount: number;
     updatedAt: string;
     isCurrent: boolean;
+    forbidden: boolean;
 }
 export interface ProjectArchitecture {
     projectId: string;

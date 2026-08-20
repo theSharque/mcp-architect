@@ -9,8 +9,8 @@ Do **not** import the whole repo in one step. Architector stores data in `~/.mcp
 
 ## Before writing
 
-1. `list-projects` — confirm `projectId` matches this workspace (`MCP_PROJECT_ID`).
-2. `get-project-architecture` — see what is already documented; resume instead of restarting blindly.
+1. `list-projects` — find `projectId` for this workspace (`query` by folder name). Pass it to every other tool. Never omit. Never use `default-project`.
+2. `get-project-architecture` with that `projectId` — see what is already documented; resume instead of restarting blindly.
 
 ## Phases (one phase per user-visible step unless asked to continue)
 
@@ -21,7 +21,7 @@ Do **not** import the whole repo in one step. Architector stores data in `~/.mcp
 
 ### Phase 1 — Structure only
 
-- `set-project-architecture` with `replaceModules: true` only for greenfield; otherwise merge.
+- `set-project-architecture` with `projectId` from Phase 0 / `list-projects`. `replaceModules: true` only for greenfield; otherwise merge.
 - Modules: name, description, dependencies — **no** long text, **no** facts yet.
 - `rebuild-data-flow` if many modules.
 - `validate` — fix structure issues; report summary to user.

@@ -1,6 +1,6 @@
 {
   "name": "mcp-architector",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "MCP server for architecture and system design",
   "type": "module",
   "main": "dist/index.js",
@@ -11,7 +11,7 @@
     "dev": "tsx watch src/index.ts",
     "inspector": "npx @modelcontextprotocol/inspector node dist/index.js",
     "prepublishOnly": "npm run build",
-    "test:unit": "npm run build && node --test dist/data-flow.test.js dist/entry-coverage.test.js dist/project-validate.test.js dist/slice-coverage.test.js dist/entry-search.test.js dist/entry-sync.test.js dist/refactor.test.js"
+    "test:unit": "npm run build && node --test dist/data-flow.test.js dist/entry-coverage.test.js dist/project-validate.test.js dist/slice-coverage.test.js dist/entry-search.test.js dist/entry-sync.test.js dist/refactor.test.js dist/project-id.test.js"
   },
   "keywords": ["mcp", "model-context-protocol", "architecture", "system-design"],
   "author": "theSharque",
@@ -20,8 +20,12 @@
     "ajv": "8.18.0",
     "qs": "6.15.2",
     "express-rate-limit": "8.5.2",
-    "hono": "4.12.21",
-    "ip-address": "10.2.0"
+    "hono": "4.12.34",
+    "ip-address": "10.5.0",
+    "@hono/node-server": "1.19.17",
+    "body-parser": "2.3.0",
+    "fast-uri": "3.1.5",
+    "esbuild": "0.28.2"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

@@ -27,6 +27,7 @@ import {
 } from "./storage.js";
 import { migrateScriptsToEntries } from "./migrate-scripts.js";
 import { ENTRIES_MODULE_REMINDER, BULK_BATCH_GUIDANCE, buildEntryLinkHints } from "./agent-hints.js";
+import { projectIdSchema, type ProjectIdResolver } from "./project-id.js";
 import {
   MAX_BULK_ENTRIES,
   computeImportStats,
@@ -91,7 +92,6 @@ export const moduleFactSchema = z.object({
   tags: z.array(z.string()).optional(),
 });
 
-type ProjectIdResolver = (provided?: string) => string;
 
 async function saveSingleEntry(
   projectId: string,
@@ -160,12 +160,7 @@ export function registerEntriesAndSlicesTools(
       description:
         `${ENTRIES_MODULE_REMINDER} Creates or updates one canonical project fact (entry). Use when you discovered a concrete fact while working. Do not use for module structure—use set-module-details. Do not copy module.description into summary; link via refs.moduleName only. Upsert: pass id to update, or omit id to match by kind+title or create new. Example: kind=http-endpoint, title='POST /orders', summary='Creates order', refs.moduleName='orders', refs.files=['src/OrderController.java'].`,
       inputSchema: {
-        projectId: z
-          .string()
-          .optional()
-          .describe(
-            "Project id from list-projects if workspace path may differ; defaults to MCP_PROJECT_ID"
-          ),
+        projectId: projectIdSchema,
         id: z
           .string()
           .optional()
@@ -223,7 +218,7 @@ export function registerEntriesAndSlicesTools(
       description:
         `${ENTRIES_MODULE_REMINDER} ${BULK_BATCH_GUIDANCE} Set refs.moduleName per entry, or pass top-level moduleName as default. Prefer set-entries in 50-entry chunks over one huge replace-entries payload.`,
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
         moduleName: z
           .string()
           .optional()
@@ -284,7 +279,7 @@ export function registerEntriesAndSlicesTools(
       description:
         "Bulk delete entries matching kind/moduleName/tags filter. Requires confirm=true. Use before full re-import or to clear a module slice. Prefer replace-entries with deleteOrphans for idempotent sync.",
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
         kind: z.string().optional().describe("Exact entry kind"),
         kinds: z.array(z.string()).optional().describe("Entry kinds"),
         moduleName: z.string().optional().describe("Only entries linked to this module"),
@@ -332,7 +327,7 @@ export function registerEntriesAndSlicesTools(
       description:
         `${BULK_BATCH_GUIDANCE} Idempotent sync for up to ${MAX_BULK_ENTRIES} entries in scope; optionally delete orphans not in this batch. Match by upsertBy (default kind+title). For large catalogs use deleteOrphans=false on intermediate batches, true only on the last batch.`,
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
         scope: replaceScopeSchema.describe("Which existing entries participate in orphan deletion"),
         moduleName: z
           .string()
@@ -388,7 +383,7 @@ export function registerEntriesAndSlicesTools(
       description:
         `${BULK_BATCH_GUIDANCE} Alias for replace-entries (mode=replace). Pass filter as scope; send up to ${MAX_BULK_ENTRIES} entries per call.`,
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
         mode: z
           .enum(["replace"])
           .describe("Only replace mode is supported (full slice sync)"),
@@ -447,7 +442,7 @@ export function registerEntriesAndSlicesTools(
       description:
         `Dry-run validation for a proposed import batch (max ${MAX_BULK_ENTRIES} entries). ${BULK_BATCH_GUIDANCE} Checks duplicate upsert keys and unknown moduleName refs without writing.`,
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
         entries: z
           .array(moduleFactSchema)
           .max(MAX_BULK_ENTRIES)
@@ -507,7 +502,7 @@ export function registerEntriesAndSlicesTools(
       description:
         "Returns entry counts grouped by kind, module, and tag. Use after replace-entries/import to verify catalog size.",
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
       },
       outputSchema: {
         byKind: z.record(z.string(), z.number()),
@@ -536,7 +531,7 @@ export function registerEntriesAndSlicesTools(
       description:
         "Returns one full entry by id. Use after list-entries or search-entries when you need payload and refs. Do not use for a full API list—use get-slice sliceId=api. Do not use for module structure—use get-module-details.",
       inputSchema: {
-        projectId: z.string().optional().describe("Project id; use list-projects if unsure"),
+        projectId: projectIdSchema,
         id: z.string().describe("Entry id from list-entries or search-entries"),
       },
       outputSchema: { entry: z.any() },
@@ -567,7 +562,7 @@ export function registerEntriesAndSlicesTools(
       description:
         "Removes one entry and updates the index. Use when a fact is obsolete. Do not use to delete modules—use delete-module. Cannot delete slice definitions—use delete-slice.",
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
         id: z.string().describe("Entry id to delete"),
       },
       outputSchema: { message: z.string() },
@@ -589,7 +584,7 @@ export function registerEntriesAndSlicesTools(
       description:
         "Returns the entry catalog (id, kind, title, tags, moduleName)—no payload. Supports kind/moduleName/tags filters and pagination (limit max 200). Unlinked entries lack moduleName; run validate after edits. For typed horizontal views use get-slice.",
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
         kind: z.string().optional().describe("Filter by exact kind, e.g. http-endpoint"),
         moduleName: z.string().optional().describe("Filter by refs.moduleName"),
         tags: z
@@ -652,7 +647,7 @@ export function registerEntriesAndSlicesTools(
       description:
         "Compact navigation search over entries by title, summary, kind, and tags. Returns snippet, matchedIn, slices, and moduleName per hit—use get-entry for full payload. Prefer get-slice when you know the category (api, domain). Filters (moduleName, kind, tags) narrow agent context. Default limit 10.",
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
         query: z.string().describe("Search text"),
         moduleName: z
           .string()
@@ -736,7 +731,7 @@ export function registerEntriesAndSlicesTools(
       description:
         "Lists built-in and custom slice views (filters over entries—not separate stored data). Empty slice = no entries with matching kind, not a missing slice definition. Use before get-slice to pick sliceId (api, domain, persistence, …).",
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
       },
       outputSchema: { slices: z.array(z.any()) },
     },
@@ -804,7 +799,7 @@ export function registerEntriesAndSlicesTools(
       description:
         "Returns a horizontal project view: filtered entries transformed for agents. Empty slice = no entries with matching kind. Call list-slices first to pick sliceId. format=compact default; table for api/ui slice. Use offset/limit for pagination. Filter further by moduleName or tags.",
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
         sliceId: z
           .string()
           .describe("Built-in id (api, ui, domain, persistence, …) or custom id from list-slices"),
@@ -891,7 +886,7 @@ export function registerEntriesAndSlicesTools(
       description:
         "Saves a custom slice definition (filter only—no items). Items always live in entries. Use when built-in slices (api, domain, …) are not enough, e.g. filter kinds godot-scene + tag gameplay. Do not store duplicate entry text here. get-slice reads entries through this filter.",
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
         id: z
           .string()
           .describe("Custom slice id (avoid colliding with built-in: api, domain, persistence, …)"),
@@ -958,7 +953,7 @@ export function registerEntriesAndSlicesTools(
       description:
         "Deletes a custom slice definition only. Built-in slices (api, domain, …) cannot be deleted. Does not delete entries—use delete-entry.",
       inputSchema: {
-        projectId: z.string().optional().describe("Project id"),
+        projectId: projectIdSchema,
         sliceId: z.string().describe("Custom slice id from list-slices"),
       },
       outputSchema: { message: z.string() },

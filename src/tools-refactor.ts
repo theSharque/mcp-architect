@@ -4,6 +4,7 @@ import {
   MAX_REFACTOR_OPERATIONS,
   runRefactorArchitecture,
 } from './refactor.js';
+import { projectIdSchema, type ProjectIdResolver } from './project-id.js';
 
 const refactorTextFieldSchema = z.enum([
   'title',
@@ -79,7 +80,7 @@ const refactorOperationSchema = z.discriminatedUnion('type', [
 
 export function registerRefactorTools(
   server: McpServer,
-  resolveProjectId: (provided?: string) => string
+  resolveProjectId: ProjectIdResolver
 ): void {
   server.registerTool(
     'refactor-architecture',
@@ -88,7 +89,7 @@ export function registerRefactorTools(
       description:
         'Preview or apply in-repo refactor sync to architector data (no workspace access). Default dryRun=true. Workflow: (1) scan with file/text to list hits, (2) build 1-3 mutation ops, (3) dryRun preview, (4) apply with dryRun=false and confirm=true. Mutations: move-file, replace-path-prefix, rename-text, patch-entry, merge-files, remove-file-ref. Orphan entries with empty refs.files and no entryIds are deleted. Does not change module names or dataFlow.',
       inputSchema: {
-        projectId: z.string().optional().describe('Project ID (defaults to normalized workdir)'),
+        projectId: projectIdSchema,
         operations: z
           .array(refactorOperationSchema)
           .min(1)

@@ -11,6 +11,7 @@ import type {
   ProjectSummary,
   SliceDefinition,
 } from './types.js';
+import { isForbiddenProjectId } from './project-id.js';
 
 const STORAGE_BASE_DIR = path.join(os.homedir(), '.mcp-architector');
 
@@ -447,13 +448,17 @@ export async function listProjects(
         }
         const dirStat = await fs.stat(getProjectDir(projectId));
 
+        const forbidden = isForbiddenProjectId(projectId);
+        const isCurrent = !forbidden && projectId === currentProjectId;
+
         if (architecture) {
           return {
             projectId,
             description: architecture.description,
             moduleCount: architecture.modules.length,
             updatedAt: architecture.updatedAt,
-            isCurrent: projectId === currentProjectId,
+            isCurrent,
+            forbidden,
           };
         }
 
@@ -463,7 +468,8 @@ export async function listProjects(
           description: '',
           moduleCount,
           updatedAt: dirStat.mtime.toISOString(),
-          isCurrent: projectId === currentProjectId,
+          isCurrent,
+          forbidden,
         };
       })
   );

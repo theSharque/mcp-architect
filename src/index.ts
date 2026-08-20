@@ -15,6 +15,12 @@ import {
   normalizeProjectId,
   rebuildEntryIndex,
 } from "./storage.js";
+import {
+  isForbiddenProjectId,
+  PROJECT_ID_LIST_REMINDER,
+  projectIdSchema,
+  resolveProjectId,
+} from "./project-id.js";
 import { registerEntriesAndSlicesTools } from "./tools-entries-slices.js";
 import { registerRefactorTools } from "./tools-refactor.js";
 import { MODULE_ENTRIES_REMINDER, suggestKindsFromFiles } from "./agent-hints.js";
@@ -34,9 +40,6 @@ import {
 } from "./data-flow.js";
 import type { ProjectArchitecture, ModuleDetails, ModuleSummary, DataFlow } from "./types.js";
 
-function resolveProjectId(provided?: string): string {
-  return provided || globalProjectId || "default-project";
-}
 
 async function loadModuleDetailsMap(
   projectId: string,
@@ -56,19 +59,33 @@ const packageJson = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../package.json"), "utf-8")
 ) as { version: string };
 
-const server = new McpServer({
-  name: "mcp-architector",
-  version: packageJson.version,
-});
+const server = new McpServer(
+  {
+    name: "mcp-architector",
+    version: packageJson.version,
+  },
+  {
+    instructions:
+      "Always call list-projects first. Pass projectId to every other tool. Match the current workspace by folder name. Never omit projectId. Never use default-project.",
+  }
+);
 
 // Store the project ID from environment
 let globalProjectId: string | null = null;
 
-// Try to get project ID from environment on startup
 const envProjectId = process.env.MCP_PROJECT_ID;
 if (envProjectId) {
-  globalProjectId = normalizeProjectId(envProjectId);
-  console.error(`Initialized with project ID from env: ${globalProjectId}`);
+  try {
+    const normalized = normalizeProjectId(envProjectId);
+    if (isForbiddenProjectId(envProjectId) || isForbiddenProjectId(normalized)) {
+      console.error(`Ignoring forbidden MCP_PROJECT_ID: ${envProjectId}`);
+    } else {
+      globalProjectId = normalized;
+      console.error(`Initialized with project ID from env: ${globalProjectId}`);
+    }
+  } catch {
+    console.error(`Ignoring invalid MCP_PROJECT_ID: ${envProjectId}`);
+  }
 }
 
 /**
@@ -79,9 +96,9 @@ server.registerTool(
   {
     title: "Set Project Architecture",
     description:
-      "Creates or updates vertical module structure (components and dataFlow)—not horizontal facts. By default merges modules and dataFlow by name; omit dataFlow to keep existing flow. Use replaceModules or replaceDataFlow for full replace. For one module use set-module-details or set-module-data-flow. For bulk flow rebuild use rebuild-data-flow. Each new module still needs entries—use set-module-details with facts[] or set-entries after bulk structure. For APIs, domain terms, scripts use set-entry + get-slice—not this tool. If projectId is wrong, call list-projects first. Do not duplicate entry text in module descriptions.",
+      "Creates or updates vertical module structure (components and dataFlow)—not horizontal facts. By default merges modules and dataFlow by name; omit dataFlow to keep existing flow. Use replaceModules or replaceDataFlow for full replace. For one module use set-module-details or set-module-data-flow. For bulk flow rebuild use rebuild-data-flow. Each new module still needs entries—use set-module-details with facts[] or set-entries after bulk structure. For APIs, domain terms, scripts use set-entry + get-slice—not this tool. projectId is required—call list-projects first. Never use default-project. Do not duplicate entry text in module descriptions.",
     inputSchema: {
-      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+      projectId: projectIdSchema,
       description: z.string().describe("Overall project description"),
       modules: z.array(
         z.object({
@@ -167,9 +184,9 @@ server.registerTool(
   {
     title: "Get Project Architecture",
     description:
-      "Returns vertical structure: project description, module list, dataFlow. Use for refactoring boundaries between components. For all HTTP endpoints or domain terms use get-slice—not this tool. For one module's files and examples use get-module-details. projectId from list-projects if unsure.",
+      "Returns vertical structure: project description, module list, dataFlow. Use for refactoring boundaries between components. For all HTTP endpoints or domain terms use get-slice—not this tool. For one module's files and examples use get-module-details. projectId is required—call list-projects first.",
     inputSchema: {
-      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+      projectId: projectIdSchema,
     },
     outputSchema: {
       architecture: z.any(),
@@ -213,12 +230,14 @@ server.registerTool(
   {
     title: "List Projects",
     description:
-      "Lists all projects in ~/.mcp-architector with projectId, description, moduleCount, updatedAt, isCurrent. Call first when tools return empty/wrong project—the workspace path may normalize to a different id (e.g. _qs_my-app). Then pass projectId to other tools. Optional query filters by id or description.",
+      "Call first. Lists projects in ~/.mcp-architector with projectId, description, moduleCount, updatedAt, isCurrent, forbidden. Match this workspace by folder name (query). Pass that projectId to every other tool—never omit, never use default-project. isCurrent is only a hint from MCP_PROJECT_ID. If none matches, create with set-project-architecture using a stable id from the workspace path.",
     inputSchema: {
       query: z.string().optional().describe("Filter by substring in projectId or description"),
     },
     outputSchema: {
       projects: z.array(z.any()),
+      suggestedProjectId: z.string().nullable(),
+      reminder: z.string(),
     },
   },
   async ({ query }) => {
@@ -228,11 +247,17 @@ server.registerTool(
       content: [
         {
           type: "text",
-          text: JSON.stringify(projects, null, 2),
+          text: JSON.stringify(
+            { projects, suggestedProjectId: globalProjectId, reminder: PROJECT_ID_LIST_REMINDER },
+            null,
+            2
+          ),
         },
       ],
       structuredContent: {
         projects,
+        suggestedProjectId: globalProjectId,
+        reminder: PROJECT_ID_LIST_REMINDER,
       },
     };
   }
@@ -267,7 +292,7 @@ server.registerTool(
         BULK_BATCH_GUIDANCE +
         " Without entries, get-slice will be empty for this module. After edits call validate to verify links. Does not replace other modules. Prefer over set-project-architecture for single-module edits.",
     inputSchema: {
-      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+      projectId: projectIdSchema,
       name: z.string().describe("Module name"),
       description: z.string().describe("Detailed description of the module"),
       inputs: z.string().describe("What the module accepts as input"),
@@ -424,7 +449,7 @@ server.registerTool(
     description:
       "Returns one module's full detail (files, dependencies, examples). Use when you know the module name from get-project-architecture or list-modules. If module has files but get-slice is empty, add entries with refs.moduleName=this module. For cross-cutting API/domain lists use get-slice. moduleName must match architecture exactly.",
     inputSchema: {
-      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+      projectId: projectIdSchema,
       moduleName: z.string().describe("Name of the module to retrieve"),
     },
     outputSchema: {
@@ -504,7 +529,7 @@ server.registerTool(
     description:
       "Lists module summaries from architecture (name, description)—vertical structure only. For horizontal facts (endpoints, tables, terms) use list-slices then get-slice. After edits run validate. Use module names in set-entry refs.moduleName.",
     inputSchema: {
-      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+      projectId: projectIdSchema,
     },
     outputSchema: {
       modules: z.array(z.any()),
@@ -550,7 +575,7 @@ server.registerTool(
     description:
       "Patches dataFlow for one module (dependsOn is canonical; providesTo is recomputed). Syncs module file dependencies. Prefer over set-project-architecture for single-module graph edits.",
     inputSchema: {
-      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+      projectId: projectIdSchema,
       moduleName: z.string().describe("Module name"),
       dependsOn: z.array(z.string()).optional().describe("Modules this module depends on"),
       dataTransformation: z.string().optional().describe("How data is transformed between modules"),
@@ -631,7 +656,7 @@ server.registerTool(
     description:
       "Rebuilds dataFlow for all modules from module file dependencies or existing dependsOn edges. Recomputes providesTo and optionally syncs module files. Use instead of editing architecture.json directly.",
     inputSchema: {
-      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+      projectId: projectIdSchema,
       source: z
         .enum(["module-dependencies", "dataFlow-dependsOn"])
         .optional()
@@ -756,7 +781,7 @@ const validationOutputSchema = {
 };
 
 const validationInputSchema = {
-  projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+  projectId: projectIdSchema,
   checkInverse: z.boolean().optional().describe("Check providesTo vs dependsOn inverse (default true)"),
   checkModuleDeps: z.boolean().optional().describe("Check module.dependencies vs dataFlow.dependsOn (default true)"),
   checkEntryCoverage: z.boolean().optional().describe("Check modules vs entries linkage (default true)"),
@@ -842,7 +867,7 @@ server.registerTool(
     description:
       "Rebuilds entries/index.json from entry files on disk. Use when list-entries or get-slice miss entries that exist as files (index drift). Does not modify entry bodies.",
     inputSchema: {
-      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+      projectId: projectIdSchema,
     },
     outputSchema: {
       itemCount: z.number(),
@@ -877,7 +902,7 @@ server.registerTool(
     description:
       "Deletes one module from architecture and its module detail file. Does not delete entries—remove those with delete-entry if needed. Does not delete custom slices.",
     inputSchema: {
-      projectId: z.string().optional().describe("Project ID (defaults to normalized workdir)"),
+      projectId: projectIdSchema,
       moduleName: z.string().describe("Name of the module to delete"),
     },
     outputSchema: {
@@ -955,7 +980,8 @@ server.registerResource(
       "Resource URI arch://{projectId} — same JSON as get-project-architecture. Prefer tools for agent workflows.",
   },
   async (uri, { projectId }) => {
-    const architecture = await readArchitecture(String(projectId));
+    const resolvedProjectId = resolveProjectId(String(projectId));
+    const architecture = await readArchitecture(resolvedProjectId);
 
     if (!architecture) {
       return {
@@ -993,7 +1019,8 @@ server.registerResource(
       "Resource URI module://{projectId}/{moduleId} — same as get-module-details when you have module uuid. Prefer get-module-details with moduleName for agents.",
   },
   async (uri, { projectId, moduleId }) => {
-    const moduleDetails = await readModule(String(projectId), String(moduleId));
+    const resolvedProjectId = resolveProjectId(String(projectId));
+    const moduleDetails = await readModule(resolvedProjectId, String(moduleId));
 
     if (!moduleDetails) {
       return {

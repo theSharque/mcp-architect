@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { isForbiddenProjectId } from './project-id.js';
 const STORAGE_BASE_DIR = path.join(os.homedir(), '.mcp-architector');
 export function getStorageBaseDir() {
     return STORAGE_BASE_DIR;
@@ -379,13 +380,16 @@ export async function listProjects(currentProjectId, query) {
             architecture = null;
         }
         const dirStat = await fs.stat(getProjectDir(projectId));
+        const forbidden = isForbiddenProjectId(projectId);
+        const isCurrent = !forbidden && projectId === currentProjectId;
         if (architecture) {
             return {
                 projectId,
                 description: architecture.description,
                 moduleCount: architecture.modules.length,
                 updatedAt: architecture.updatedAt,
-                isCurrent: projectId === currentProjectId,
+                isCurrent,
+                forbidden,
             };
         }
         const moduleCount = (await listModules(projectId)).length;
@@ -394,7 +398,8 @@ export async function listProjects(currentProjectId, query) {
             description: '',
             moduleCount,
             updatedAt: dirStat.mtime.toISOString(),
-            isCurrent: projectId === currentProjectId,
+            isCurrent,
+            forbidden,
         };
     }));
     const normalizedQuery = query?.trim().toLowerCase();

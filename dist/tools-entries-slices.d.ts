@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { type ProjectIdResolver } from "./project-id.js";
 export declare const moduleFactSchema: z.ZodObject<{
     kind: z.ZodString;
     title: z.ZodString;
@@ -42,7 +43,5 @@ export declare const moduleFactSchema: z.ZodObject<{
         entryIds?: string[] | undefined;
     } | undefined;
 }>;
-type ProjectIdResolver = (provided?: string) => string;
 export declare function registerEntriesAndSlicesTools(server: McpServer, resolveProjectId: ProjectIdResolver): void;
-export {};
 //# sourceMappingURL=tools-entries-slices.d.ts.map

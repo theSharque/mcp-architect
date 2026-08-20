@@ -46,7 +46,7 @@ For **Cursor IDE** and **Cursor Cloud Agents**, use a phased onboarding rule so 
    cp /path/to/mcp-architector/.cursor/rules/architector-onboarding.mdc /path/to/your-app/.cursor/rules/
    ```
 
-2. Ensure MCP Architector is configured with `MCP_PROJECT_ID` pointing at that workspace (see [How to connect](#how-to-connect-to-claude-desktop--ide)).
+2. Ensure MCP Architector is connected. The agent must call `list-projects` and pass `projectId` on every write — do not rely on omitting it.
 
 3. Ask in chat, for example: *"Onboard this repo into architector — phase 0 plan first"* or *"Import architecture module by module"*.
 
@@ -95,7 +95,7 @@ Store and manage project architecture, modules, scripts, data flow, and usage ex
 
 ## Agent workflow
 
-1. `list-projects` — confirm `projectId` if data looks empty or wrong.
+1. `list-projects` — find `projectId` for this workspace (query by folder name). Pass it to every other tool. Never omit. Never use `default-project`.
 2. **Structure task** → `get-project-architecture` / `set-project-architecture`.
 3. **Each module** → `set-module-details` with `files` + **`facts[]`** (endpoints, entities, glossary) in the same call, or `set-entries` / `set-entry` with `refs.moduleName`.
 4. **Single module graph edge** → `set-module-data-flow`.
@@ -270,11 +270,13 @@ Edit `.continue/config.json`:
 
 ### Using Project ID
 
-When calling tools, you can:
+`projectId` is **required** on every tool except `list-projects`. There is no default dump project.
 
-1. **Use automatic project ID** (from `${workspaceFolder}` env var): Just omit the `projectId` parameter
-2. **Override per call**: Pass `projectId` explicitly in the tool call
-3. **Use default**: If neither is provided, uses "default-project"
+1. **Call `list-projects` first** (optionally with `query` = workspace folder name)
+2. **Pass the matching `projectId`** to every other tool
+3. If none matches, create one with `set-project-architecture` using a stable id from the workspace path (e.g. `_qs_my-app`)
+
+`MCP_PROJECT_ID` is only a hint (`isCurrent` / `suggestedProjectId`). It is **not** used as a silent write target. `default-project` and unsubstituted `${workspaceFolder}` ids are forbidden.
 
 ## Tools
 
@@ -283,7 +285,7 @@ When calling tools, you can:
 Creates or updates the overall architecture for a project. **By default merges** modules and dataFlow by name; omit `dataFlow` to preserve existing flow. `dependsOn` is canonical; `providesTo` is recomputed on save.
 
 **Input:**
-- `projectId` (optional): Project ID (defaults to "default-project")
+- `projectId` (required): Project ID from `list-projects`. Never omit. `default-project` is forbidden.
 - `description`: Overall project description
 - `modules`: Array of module objects with:
   - `name`: Module name
@@ -307,20 +309,22 @@ Creates or updates the overall architecture for a project. **By default merges**
 Retrieves the overall architecture of the project.
 
 **Input:**
-- `projectId` (optional): Project ID (defaults to "default-project")
+- `projectId` (required): Project ID from `list-projects`. Never omit. `default-project` is forbidden.
 
 **Output:**
 - Complete project architecture
 
 ### list-projects
 
-Lists all projects in local storage (`~/.mcp-architector`). Use when the workspace may map to a different normalized `projectId`.
+Lists all projects in local storage (`~/.mcp-architector`). **Call this first.** Match the current workspace by folder name, then pass `projectId` to every other tool.
 
 **Input:**
 - `query` (optional): Filter by substring in projectId or description (case-insensitive)
 
 **Output:**
-- Array of project summaries: `projectId`, `description`, `moduleCount`, `updatedAt`, `isCurrent` (matches current `MCP_PROJECT_ID`)
+- `projects[]`: `projectId`, `description`, `moduleCount`, `updatedAt`, `isCurrent` (hint from `MCP_PROJECT_ID`), `forbidden` (`default-project` and unsubstituted workspaceFolder dumps)
+- `suggestedProjectId`: current `MCP_PROJECT_ID` when it is a valid id, else `null`
+- `reminder`: always pass `projectId`; never use `default-project`
 
 ### Entries and slices
 
@@ -362,7 +366,7 @@ Compact navigation search—returns enough context to pick a hit, then call `get
 Creates or updates detailed information about a module. **Slices read entries, not module text** — pass `facts[]` to create linked entries in one call.
 
 **Input:**
-- `projectId` (optional): Project ID
+- `projectId` (required): Project ID from `list-projects`
 - `name`: Module name
 - `description`: Detailed description of the module
 - `inputs`: What the module accepts as input
@@ -387,7 +391,7 @@ Creates or updates detailed information about a module. **Slices read entries, n
 Patches `dataFlow` for a single module without sending the full architecture.
 
 **Input:**
-- `projectId` (optional): Project ID
+- `projectId` (required): Project ID from `list-projects`
 - `moduleName`: Module name
 - `dependsOn` (optional): Modules this module depends on (canonical)
 - `dataTransformation` (optional): How data is transformed
@@ -401,7 +405,7 @@ Patches `dataFlow` for a single module without sending the full architecture.
 Rebuilds `dataFlow` for all modules from module file `dependencies` or existing `dependsOn` edges. Replaces bulk manual edits to `architecture.json`.
 
 **Input:**
-- `projectId` (optional): Project ID
+- `projectId` (required): Project ID from `list-projects`
 - `source` (optional): `module-dependencies` (default) or `dataFlow-dependsOn`
 - `syncInverse` (optional): Recompute `providesTo` (default `true`)
 - `pruneOrphans` (optional): Remove invalid module references (default `true`)
@@ -452,7 +456,7 @@ Same as `validate` (legacy alias). Prefer `validate` after edits.
 Retrieves detailed information about a specific module.
 
 **Input:**
-- `projectId` (optional): Project ID
+- `projectId` (required): Project ID from `list-projects`
 - `moduleName`: Name of the module to retrieve
 
 **Output:**
@@ -463,7 +467,7 @@ Retrieves detailed information about a specific module.
 Lists all modules in the project architecture.
 
 **Input:**
-- `projectId` (optional): Project ID
+- `projectId` (required): Project ID from `list-projects`
 
 **Output:**
 - Array of module summaries
@@ -473,7 +477,7 @@ Lists all modules in the project architecture.
 Deletes a module from the project architecture.
 
 **Input:**
-- `projectId` (optional): Project ID
+- `projectId` (required): Project ID from `list-projects`
 - `moduleName`: Name of the module to delete
 
 **Output:**
@@ -511,15 +515,15 @@ mcp-architector/
 └── README.md
 ```
 
-## Project ID and Workdir
+## Project ID
 
-The server uses `projectId` to organize data in separate directories. The priority for determining project ID is:
+The server stores each project in `~/.mcp-architector/{projectId}/`. `projectId` must be passed explicitly on every tool except `list-projects`.
 
-1. **Explicitly passed** in tool call parameters (highest priority)
-2. **From environment variable** `MCP_PROJECT_ID` (set during initialization)
-3. **Default fallback** "default-project" (lowest priority)
+- Call `list-projects` (with `query` = workspace folder name) to find the id
+- `MCP_PROJECT_ID` is only a listing hint (`isCurrent` / `suggestedProjectId`), not a silent write target
+- `default-project` and unsubstituted `${workspaceFolder}` ids are forbidden
 
-For Cursor integration, set `MCP_PROJECT_ID` to use the workspace directory automatically as the project ID.
+To start a new project, pass a stable id derived from the workspace path (e.g. `_qs_my-app`) to `set-project-architecture`.
 
 ### Extending the Server
 

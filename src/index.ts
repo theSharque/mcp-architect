@@ -15,6 +15,7 @@ import {
   normalizeProjectId,
   rebuildEntryIndex,
 } from "./storage.js";
+import { fixProjectData } from "./fix-data.js";
 import {
   isForbiddenProjectId,
   PROJECT_ID_LIST_REMINDER,
@@ -841,7 +842,7 @@ server.registerTool(
   {
     title: "Validate Project",
     description:
-      "Run after set-project-architecture, set-module-details, set-entry, or set-entries. Returns a compact report (summary, stats, issues by kind)—no need to load the full project in the agent. Checks only known rules: dataFlow consistency, module↔entry links, module detail files, entry index drift, empty api/domain/persistence slices, entry slice coverage, optional module-too-few-entries when moduleEntryMin is set. Fix issues[] then call validate again.",
+      "Run after set-project-architecture, set-module-details, set-entry, or set-entries. Returns a compact report (summary, stats, issues by kind)—no need to load the full project in the agent. Checks only known rules: dataFlow consistency, module↔entry links, module detail files, entry index drift, empty api/domain/persistence slices, entry slice coverage, optional module-too-few-entries when moduleEntryMin is set. If catalog JSON is corrupt, run fix-data first. Fix issues[] then call validate again.",
     inputSchema: validationInputSchema,
     outputSchema: validationOutputSchema,
   },
@@ -858,6 +859,53 @@ server.registerTool(
     outputSchema: validationOutputSchema,
   },
   async (params) => runValidationTool(params)
+);
+
+server.registerTool(
+  "fix-data",
+  {
+    title: "Fix Catalog Data",
+    description:
+      "Run when catalog JSON is corrupt (list-modules, get-module-details, or validate fail with extra data after JSON). Rewrites the first valid JSON object in architecture, modules, entries, and slices; removes leftover .tmp files; rebuilds the entry index. Does not delete facts. Optional dryRun previews without writing.",
+    inputSchema: {
+      projectId: projectIdSchema,
+      dryRun: z
+        .boolean()
+        .optional()
+        .describe("Preview repairs without writing (default false)"),
+    },
+    outputSchema: {
+      projectId: z.string(),
+      scanned: z.number(),
+      repaired: z.number(),
+      unreadable: z.number(),
+      tmpRemoved: z.number(),
+      indexItemCount: z.number(),
+      files: z.array(
+        z.object({
+          path: z.string(),
+          status: z.string(),
+          extraBytes: z.number().optional(),
+          detail: z.string().optional(),
+        })
+      ),
+      summary: z.string(),
+      dryRun: z.boolean(),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+  },
+  async ({ projectId: providedProjectId, dryRun }) => {
+    const projectId = resolveProjectId(providedProjectId);
+    const result = await fixProjectData(projectId, { dryRun });
+    return {
+      content: [{ type: "text" as const, text: result.summary }],
+      structuredContent: { ...result },
+    };
+  }
 );
 
 server.registerTool(

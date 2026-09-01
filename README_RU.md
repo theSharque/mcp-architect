@@ -112,6 +112,7 @@
 | Patch dataFlow одного модуля | `set-module-data-flow` |
 | Пересчитать все рёбра | `rebuild-data-flow` |
 | Проверка после правок | `validate` |
+| Повреждённый JSON каталога | `fix-data` |
 | Синхронизация путей/имён после рефакторинга | `refactor-architecture` (dryRun, затем confirm) |
 | Рассинхрон index | `rebuild-entry-index` |
 | Проект с нуля | `set-project-architecture` с `replaceModules: true` |
@@ -321,6 +322,7 @@ npm run inspector
 | `get-slice` | Срез: `sliceId`, `format`, `query`, `limit`, `offset`, `hasMore` |
 | `set-slice` / `delete-slice` | Custom фильтр (без items) |
 | `rebuild-entry-index` | Пересборка `entries/index.json` |
+| `fix-data` | Починка битого JSON каталога; пересборка index |
 
 **Встроенные sliceId:** `api`, `persistence`, `events`, `domain`, `flows`, `integrations`, `config`, `runtime`, `decisions`, `scripts`.
 
@@ -349,6 +351,14 @@ Patch `dataFlow` одного модуля: `moduleName`, `dependsOn`, `dataTran
 **Проверяет:** dataFlow, связь модуль↔entry, файлы модулей, рассинхрон index, пустые срезы api/domain/persistence.
 
 **Выход:** `valid`, `issueCount`, `summary`, `coverage`, `checksRun`.
+
+### fix-data
+
+Запускать, если JSON каталога повреждён (`list-modules` / `validate` падают с extra data after JSON). Обрезает хвост после первого валидного объекта в `architecture.json`, `modules/`, `entries/`, `slices/`; удаляет `.tmp`; пересобирает index. Факты не удаляет. Запись каталога идёт через temp+rename, чтобы хвост больше не появлялся.
+
+**Вход:** `projectId`, `dryRun` (опц., по умолчанию `false`)
+
+**Выход:** `summary`, `scanned`, `repaired`, `unreadable`, `tmpRemoved`, `indexItemCount`, `files[]`
 
 ### refactor-architecture
 

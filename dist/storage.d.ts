@@ -17,6 +17,8 @@ export declare function getModuleFile(projectId: string, moduleId: string): stri
  */
 export declare function initializeProjectStorage(projectId: string): Promise<void>;
 export declare function getEntriesDir(projectId: string): string;
+export declare function getModulesDir(projectId: string): string;
+export declare function getSlicesDir(projectId: string): string;
 export declare function getEntryFile(projectId: string, entryId: string): string;
 export declare function getEntryIndexFile(projectId: string): string;
 export declare function getSliceFile(projectId: string, sliceId: string): string;

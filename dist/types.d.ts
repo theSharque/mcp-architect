@@ -339,4 +339,21 @@ export interface RefactorDraftState {
     entries: Map<string, Entry>;
     modules: Map<string, ModuleDetails>;
 }
+export interface FixDataFile {
+    path: string;
+    status: 'repaired' | 'unreadable';
+    extraBytes?: number;
+    detail?: string;
+}
+export interface FixDataResult {
+    projectId: string;
+    scanned: number;
+    repaired: number;
+    unreadable: number;
+    tmpRemoved: number;
+    indexItemCount: number;
+    files: FixDataFile[];
+    summary: string;
+    dryRun: boolean;
+}
 //# sourceMappingURL=types.d.ts.map

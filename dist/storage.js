@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { isForbiddenProjectId } from './project-id.js';
+import { readJsonFile, writeJsonAtomic } from './json-store.js';
 const STORAGE_BASE_DIR = path.join(os.homedir(), '.mcp-architector');
 export function getStorageBaseDir() {
     return STORAGE_BASE_DIR;
@@ -48,6 +49,12 @@ export async function initializeProjectStorage(projectId) {
 export function getEntriesDir(projectId) {
     return path.join(getProjectDir(projectId), 'entries');
 }
+export function getModulesDir(projectId) {
+    return path.join(getProjectDir(projectId), 'modules');
+}
+export function getSlicesDir(projectId) {
+    return path.join(getProjectDir(projectId), 'slices');
+}
 export function getEntryFile(projectId, entryId) {
     return path.join(getEntriesDir(projectId), `${entryId}.json`);
 }
@@ -55,12 +62,11 @@ export function getEntryIndexFile(projectId) {
     return path.join(getEntriesDir(projectId), 'index.json');
 }
 export function getSliceFile(projectId, sliceId) {
-    return path.join(getProjectDir(projectId), 'slices', `${sliceId}.json`);
+    return path.join(getSlicesDir(projectId), `${sliceId}.json`);
 }
 async function readEntryIndexRaw(projectId) {
     try {
-        const content = await fs.readFile(getEntryIndexFile(projectId), 'utf-8');
-        const parsed = JSON.parse(content);
+        const parsed = await readJsonFile(getEntryIndexFile(projectId));
         if (Array.isArray(parsed)) {
             return { items: parsed };
         }
@@ -78,7 +84,7 @@ export async function readEntryIndex(projectId) {
 }
 async function writeEntryIndex(projectId, index) {
     await ensureDirectoryExists(getEntriesDir(projectId));
-    await fs.writeFile(getEntryIndexFile(projectId), JSON.stringify(index, null, 2), 'utf-8');
+    await writeJsonAtomic(getEntryIndexFile(projectId), index);
 }
 function entryToIndexItem(entry) {
     return {
@@ -127,8 +133,7 @@ export function matchesEntryFilterFields(item, filter) {
 }
 export async function readEntry(projectId, entryId) {
     try {
-        const content = await fs.readFile(getEntryFile(projectId, entryId), 'utf-8');
-        return JSON.parse(content);
+        return await readJsonFile(getEntryFile(projectId, entryId));
     }
     catch (error) {
         if (error.code === 'ENOENT') {
@@ -139,7 +144,7 @@ export async function readEntry(projectId, entryId) {
 }
 export async function writeEntry(projectId, entry) {
     await initializeProjectStorage(projectId);
-    await fs.writeFile(getEntryFile(projectId, entry.id), JSON.stringify(entry, null, 2), 'utf-8');
+    await writeJsonAtomic(getEntryFile(projectId, entry.id), entry);
     const index = await readEntryIndexRaw(projectId);
     const existingIdx = index.items.findIndex((i) => i.id === entry.id);
     const item = entryToIndexItem(entry);
@@ -231,8 +236,7 @@ export async function rebuildEntryIndex(projectId) {
 }
 export async function readSlice(projectId, sliceId) {
     try {
-        const content = await fs.readFile(getSliceFile(projectId, sliceId), 'utf-8');
-        return JSON.parse(content);
+        return await readJsonFile(getSliceFile(projectId, sliceId));
     }
     catch (error) {
         if (error.code === 'ENOENT') {
@@ -243,7 +247,7 @@ export async function readSlice(projectId, sliceId) {
 }
 export async function writeSlice(projectId, slice) {
     await initializeProjectStorage(projectId);
-    await fs.writeFile(getSliceFile(projectId, slice.id), JSON.stringify(slice, null, 2), 'utf-8');
+    await writeJsonAtomic(getSliceFile(projectId, slice.id), slice);
 }
 export async function deleteSlice(projectId, sliceId) {
     try {
@@ -257,7 +261,7 @@ export async function deleteSlice(projectId, sliceId) {
 }
 export async function listSliceIds(projectId) {
     try {
-        const dir = path.join(getProjectDir(projectId), 'slices');
+        const dir = getSlicesDir(projectId);
         const files = await fs.readdir(dir);
         return files.filter((f) => f.endsWith('.json')).map((f) => f.replace('.json', ''));
     }
@@ -282,9 +286,7 @@ export async function isScriptsMigrated(projectId) {
  */
 export async function readArchitecture(projectId) {
     try {
-        const filePath = getArchitectureFile(projectId);
-        const content = await fs.readFile(filePath, 'utf-8');
-        return JSON.parse(content);
+        return await readJsonFile(getArchitectureFile(projectId));
     }
     catch (error) {
         if (error.code === 'ENOENT') {
@@ -298,17 +300,14 @@ export async function readArchitecture(projectId) {
  */
 export async function writeArchitecture(projectId, architecture) {
     await initializeProjectStorage(projectId);
-    const filePath = getArchitectureFile(projectId);
-    await fs.writeFile(filePath, JSON.stringify(architecture, null, 2), 'utf-8');
+    await writeJsonAtomic(getArchitectureFile(projectId), architecture);
 }
 /**
  * Read module details from storage
  */
 export async function readModule(projectId, moduleId) {
     try {
-        const filePath = getModuleFile(projectId, moduleId);
-        const content = await fs.readFile(filePath, 'utf-8');
-        return JSON.parse(content);
+        return await readJsonFile(getModuleFile(projectId, moduleId));
     }
     catch (error) {
         if (error.code === 'ENOENT') {
@@ -322,15 +321,14 @@ export async function readModule(projectId, moduleId) {
  */
 export async function writeModule(projectId, moduleDetails) {
     await initializeProjectStorage(projectId);
-    const filePath = getModuleFile(projectId, moduleDetails.moduleId);
-    await fs.writeFile(filePath, JSON.stringify(moduleDetails, null, 2), 'utf-8');
+    await writeJsonAtomic(getModuleFile(projectId, moduleDetails.moduleId), moduleDetails);
 }
 /**
  * List all modules in a project
  */
 export async function listModules(projectId) {
     try {
-        const modulesDir = path.join(getProjectDir(projectId), 'modules');
+        const modulesDir = getModulesDir(projectId);
         const files = await fs.readdir(modulesDir);
         return files
             .filter(file => file.endsWith('.json'))

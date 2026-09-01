@@ -112,6 +112,7 @@ Store and manage project architecture, modules, scripts, data flow, and usage ex
 | Patch dataFlow for one module | `set-module-data-flow` |
 | Rebuild all module edges | `rebuild-data-flow` |
 | Diagnose graph + empty slices | `validate` (or `validate-architecture`) |
+| Catalog JSON corrupt (extra data after JSON) | `fix-data` |
 | Sync paths/names after refactor | `refactor-architecture` (dryRun, then confirm) |
 | Index out of sync | `rebuild-entry-index` |
 | Create project from scratch | `set-project-architecture` with `replaceModules: true` |
@@ -341,6 +342,7 @@ Lists all projects in local storage (`~/.mcp-architector`). **Call this first.**
 | `set-slice` | Save custom filter (`kinds`, `tags`) — no items |
 | `delete-slice` | Remove custom slice |
 | `rebuild-entry-index` | Rebuild `entries/index.json` from entry files |
+| `fix-data` | Repair leftover/corrupt catalog JSON; rebuild index |
 
 **Built-in `sliceId` values:** `api`, `persistence`, `events`, `domain`, `flows`, `integrations`, `config`, `runtime`, `decisions`, `scripts`.
 
@@ -427,6 +429,14 @@ Rebuilds `dataFlow` for all modules from module file `dependencies` or existing 
 **Input:** `projectId`, `checkInverse`, `checkModuleDeps`, `checkEntryCoverage`, `checkStorage`, `checkEmptySlices`, `checkSliceCoverage`, `checkModuleEntryCounts`, `moduleEntryMax` (default `50`), `moduleEntryMin` (optional; omit to disable min check) — all boolean flags default `true` unless noted
 
 **Output:** `valid`, `issueCount`, `summary`, `stats`, `issuesByKind`, `issues[]`, `coverage`, `checksRun`
+
+### fix-data
+
+Run when catalog JSON is corrupt (for example `list-modules` / `validate` fail with extra data after JSON). Trims leftover bytes after the first valid JSON object in `architecture.json`, `modules/`, `entries/`, and `slices/`; removes leftover `.tmp` files; rebuilds the entry index. Does not delete facts. Catalog writes use temp+rename so this leftover cannot recur.
+
+**Input:** `projectId`, `dryRun` (optional, default `false`)
+
+**Output:** `summary`, `scanned`, `repaired`, `unreadable`, `tmpRemoved`, `indexItemCount`, `files[]` (repaired/unreadable only)
 
 ### refactor-architecture
 

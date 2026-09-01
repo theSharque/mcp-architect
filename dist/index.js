@@ -7,6 +7,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
 import { readArchitecture, writeArchitecture, readModule, writeModule, deleteModule, listProjects, normalizeProjectId, rebuildEntryIndex, } from "./storage.js";
+import { fixProjectData } from "./fix-data.js";
 import { isForbiddenProjectId, PROJECT_ID_LIST_REMINDER, projectIdSchema, resolveProjectId, } from "./project-id.js";
 import { registerEntriesAndSlicesTools } from "./tools-entries-slices.js";
 import { registerRefactorTools } from "./tools-refactor.js";
@@ -682,7 +683,7 @@ async function runValidationTool(params) {
 }
 server.registerTool("validate", {
     title: "Validate Project",
-    description: "Run after set-project-architecture, set-module-details, set-entry, or set-entries. Returns a compact report (summary, stats, issues by kind)—no need to load the full project in the agent. Checks only known rules: dataFlow consistency, module↔entry links, module detail files, entry index drift, empty api/domain/persistence slices, entry slice coverage, optional module-too-few-entries when moduleEntryMin is set. Fix issues[] then call validate again.",
+    description: "Run after set-project-architecture, set-module-details, set-entry, or set-entries. Returns a compact report (summary, stats, issues by kind)—no need to load the full project in the agent. Checks only known rules: dataFlow consistency, module↔entry links, module detail files, entry index drift, empty api/domain/persistence slices, entry slice coverage, optional module-too-few-entries when moduleEntryMin is set. If catalog JSON is corrupt, run fix-data first. Fix issues[] then call validate again.",
     inputSchema: validationInputSchema,
     outputSchema: validationOutputSchema,
 }, async (params) => runValidationTool(params));
@@ -692,6 +693,45 @@ server.registerTool("validate-architecture", {
     inputSchema: validationInputSchema,
     outputSchema: validationOutputSchema,
 }, async (params) => runValidationTool(params));
+server.registerTool("fix-data", {
+    title: "Fix Catalog Data",
+    description: "Run when catalog JSON is corrupt (list-modules, get-module-details, or validate fail with extra data after JSON). Rewrites the first valid JSON object in architecture, modules, entries, and slices; removes leftover .tmp files; rebuilds the entry index. Does not delete facts. Optional dryRun previews without writing.",
+    inputSchema: {
+        projectId: projectIdSchema,
+        dryRun: z
+            .boolean()
+            .optional()
+            .describe("Preview repairs without writing (default false)"),
+    },
+    outputSchema: {
+        projectId: z.string(),
+        scanned: z.number(),
+        repaired: z.number(),
+        unreadable: z.number(),
+        tmpRemoved: z.number(),
+        indexItemCount: z.number(),
+        files: z.array(z.object({
+            path: z.string(),
+            status: z.string(),
+            extraBytes: z.number().optional(),
+            detail: z.string().optional(),
+        })),
+        summary: z.string(),
+        dryRun: z.boolean(),
+    },
+    annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+    },
+}, async ({ projectId: providedProjectId, dryRun }) => {
+    const projectId = resolveProjectId(providedProjectId);
+    const result = await fixProjectData(projectId, { dryRun });
+    return {
+        content: [{ type: "text", text: result.summary }],
+        structuredContent: { ...result },
+    };
+});
 server.registerTool("rebuild-entry-index", {
     title: "Rebuild Entry Index",
     description: "Rebuilds entries/index.json from entry files on disk. Use when list-entries or get-slice miss entries that exist as files (index drift). Does not modify entry bodies.",

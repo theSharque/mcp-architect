@@ -1,6 +1,6 @@
 {
   "name": "mcp-architector",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "description": "MCP server for architecture and system design",
   "type": "module",
   "main": "dist/index.js",
@@ -23,13 +23,13 @@
   "license": "MIT",
   "overrides": {
     "ajv": "8.18.0",
-    "qs": "6.15.2",
+    "qs": "6.16.0",
     "express-rate-limit": "8.5.2",
-    "hono": "4.12.34",
+    "hono": "4.13.9",
     "ip-address": "10.5.0",
     "@hono/node-server": "1.19.17",
     "body-parser": "2.3.0",
-    "fast-uri": "3.1.5",
+    "fast-uri": "3.1.8",
     "esbuild": "0.28.2"
   },
   "dependencies": {

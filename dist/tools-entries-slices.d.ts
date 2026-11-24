@@ -8,40 +8,10 @@ export declare const moduleFactSchema: z.ZodObject<{
     payload: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     refs: z.ZodOptional<z.ZodObject<{
         moduleName: z.ZodOptional<z.ZodString>;
-        files: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
-        entryIds: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
-    }, "strip", z.ZodTypeAny, {
-        moduleName?: string | undefined;
-        files?: string[] | undefined;
-        entryIds?: string[] | undefined;
-    }, {
-        moduleName?: string | undefined;
-        files?: string[] | undefined;
-        entryIds?: string[] | undefined;
-    }>>;
-    tags: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
-}, "strip", z.ZodTypeAny, {
-    kind: string;
-    title: string;
-    summary: string;
-    tags?: string[] | undefined;
-    payload?: Record<string, unknown> | undefined;
-    refs?: {
-        moduleName?: string | undefined;
-        files?: string[] | undefined;
-        entryIds?: string[] | undefined;
-    } | undefined;
-}, {
-    kind: string;
-    title: string;
-    summary: string;
-    tags?: string[] | undefined;
-    payload?: Record<string, unknown> | undefined;
-    refs?: {
-        moduleName?: string | undefined;
-        files?: string[] | undefined;
-        entryIds?: string[] | undefined;
-    } | undefined;
-}>;
+        files: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        entryIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>>;
+    tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+}, z.core.$strip>;
 export declare function registerEntriesAndSlicesTools(server: McpServer, resolveProjectId: ProjectIdResolver): void;
 //# sourceMappingURL=tools-entries-slices.d.ts.map

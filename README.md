@@ -10,6 +10,7 @@
 📦 **Install**: `npm install -g mcp-architector` or use via npx
 🌐 **npm**: https://www.npmjs.com/package/mcp-architector
 🔗 **GitHub**: https://github.com/theSharque/mcp-architect
+📜 **Changelog**: [CHANGELOG.md](CHANGELOG.md)
 
 ## How to connect to Claude Desktop / IDE
 

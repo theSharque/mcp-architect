@@ -7,12 +7,12 @@
     "url": "https://github.com/theSharque/mcp-architect",
     "source": "github"
   },
-  "version": "1.11.1",
+  "version": "1.12.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "mcp-architector",
-      "version": "1.11.1",
+      "version": "1.12.0",
       "transport": {
         "type": "stdio"
       }
